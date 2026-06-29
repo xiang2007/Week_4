@@ -1,3 +1,6 @@
+from pathlib import Path
+import img2pdf
+
 def calculate_tax_rates(income : int) -> int:
     if income >= 5001 and income <= 20000:
         return 1
@@ -22,5 +25,18 @@ def calculate_tax(income : int) -> float:
         return 0
     return (((calculate_tax_rates(income)/100)*income))
 
-def img_to_pdf(img_path : str):
-    
+def img_to_pdf(image_path : str):
+    img_path = Path(image_path).resolve()
+
+    png_files = img_path.glob("*.png")
+    jpg_files = img_path.glob("*.jpg")
+    img_files = list(png_files) + list(jpg_files)
+
+    try:
+        with open("out.pdf", "wb") as f:
+            f.write(img2pdf.convert(img_files))
+    except Exception as e:
+        print(f"Error occur {e}")
+
+
+
