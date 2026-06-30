@@ -1,0 +1,14 @@
+[project]
+name = "week-4"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+<<<<<<< HEAD:pyproject.toml
+    "img2pdf>=0.6.3",
+=======
+    "fastapi[standard]>=0.138.2",
+    "uvicorn>=0.49.0",
+>>>>>>> main:backend/pyproject.toml
+]

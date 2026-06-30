@@ -25,6 +25,7 @@ def calculate_tax(income : int) -> float:
         return 0
     return (((calculate_tax_rates(income)/100)*income))
 
+<<<<<<< HEAD:src/app.py
 def img_to_pdf(image_path : str):
     img_path = Path(image_path).resolve()
 
@@ -40,3 +41,6 @@ def img_to_pdf(image_path : str):
 
 
 
+=======
+# def ImgtoPDF(rawImg : bytes) -> None:
+>>>>>>> main:backend/src/calculate_tax.py
