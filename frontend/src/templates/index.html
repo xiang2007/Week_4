@@ -142,6 +142,43 @@
         reader.readAsDataURL(f);
       }
     }
-  </script>
+
+    // Intercept form submit
+    document.getElementById('uploadForm').addEventListener('submit', async e => {
+      e.preventDefault(); // stop normal form submission
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Converting…';
+
+      try {
+        const formData = new FormData();
+        for (const file of fileInput.files) {
+          formData.append('files', file);
+        }
+
+        const resp = await fetch('/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!resp.ok) throw new Error('Conversion failed');
+
+        // Trigger save dialog
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'converted.pdf';
+        a.click();
+        URL.revokeObjectURL(url);
+
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Convert & Download';
+      }
+    });
+</script>
 </body>
 </html>
