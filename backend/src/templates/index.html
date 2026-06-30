@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image to PDF Converter</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f3f4f6;
+      color: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .card {
+      background: #fff;
+      border-radius: 1rem;
+      box-shadow: 0 4px 24px rgba(0,0,0,.1);
+      padding: 2.5rem;
+      width: 100%;
+      max-width: 480px;
+      text-align: center;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: .5rem; }
+    p.sub { color: #6b7280; font-size: .9rem; margin-bottom: 1.5rem; }
+    .dropzone {
+      border: 2px dashed #d1d5db;
+      border-radius: .75rem;
+      padding: 2.5rem 1rem;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: #6366f1;
+      background: #eef2ff;
+    }
+    .dropzone svg { margin-bottom: .75rem; }
+    .dropzone span { color: #6366f1; text-decoration: underline; cursor: pointer; }
+    .error {
+      background: #fef2f2;
+      color: #dc2626;
+      border-radius: .5rem;
+      padding: .75rem;
+      margin-top: 1rem;
+      font-size: .9rem;
+    }
+    #preview {
+      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+      justify-content: center;
+    }
+    #preview img {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: .5rem;
+      border: 1px solid #e5e7eb;
+    }
+    button.submit {
+      margin-top: 1.5rem;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: .5rem;
+      padding: .75rem 2rem;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    button.submit:disabled {
+      background: #a5b4fc;
+      cursor: not-allowed;
+    }
+    button.submit:not(:disabled):hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Image → PDF</h1>
+    <p class="sub">Upload PNG or JPG images and download a converted PDF.</p>
+
+    <form id="uploadForm" method="POST" action="/upload" enctype="multipart/form-data">
+      <div class="dropzone" id="dropzone">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/>
+        </svg>
+        <br>
+        <span>Click to browse</span> or drag &amp; drop<br>
+        <small style="color:#9ca3af">PNG, JPG — up to 50 MB</small>
+      </div>
+      <input type="file" name="files" id="fileInput" multiple accept=".png,.jpg,.jpeg" hidden>
+
+      <div id="preview"></div>
+
+      <button type="submit" class="submit" id="submitBtn" disabled>Convert &amp; Download</button>
+    </form>
+
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+  </div>
+
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const preview = document.getElementById('preview');
+    const submitBtn = document.getElementById('submitBtn');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    dropzone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      fileInput.files = e.dataTransfer.files;
+      showPreview(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener('change', () => showPreview(fileInput.files));
+
+    function showPreview(files) {
+      preview.innerHTML = '';
+      submitBtn.disabled = !files.length;
+      for (const f of files) {
+        if (!f.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        reader.onload = e => {
+          const img = document.createElement('img');
+          img.src = e.target.result;
+          preview.appendChild(img);
+        };
+        reader.readAsDataURL(f);
+      }
+    }
+  </script>
+</body>
+</html>

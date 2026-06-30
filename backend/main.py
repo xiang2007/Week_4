@@ -1,4 +1,4 @@
-from src.app import calculate_tax
+from backend.src.app import calculate_tax
 
 def main():
     try:

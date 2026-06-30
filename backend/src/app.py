@@ -21,6 +21,3 @@ def calculate_tax(income : int) -> float:
     if income <= 5000:
         return 0
     return (((calculate_tax_rates(income)/100)*income))
-
-def img_to_pdf(img_path : str):
-    
