@@ -3,7 +3,7 @@ import io
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,8 +28,9 @@ def create_app() -> FastAPI:
 
 app = create_app()
 
-@app.post("/upload")
-async def upload(files: list[UploadFile] = File(...)):
+@app.post("/convert-pdf")
+async def convert_pdf(files: list[UploadFile] = File(...)):
+    """Proxy uploaded receipt images to the backend for PDF conversion."""
     file_tuples = [
         ("files", (f.filename, f.file, f.content_type))
         for f in files
@@ -40,10 +41,13 @@ async def upload(files: list[UploadFile] = File(...)):
             files=file_tuples
         )
 
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Backend conversion failed")
+
     return StreamingResponse(
         io.BytesIO(resp.content),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": "attachment; filename=converted.pdf"
+            "Content-Disposition": "attachment; filename=tax_receipts.pdf"
         }
     )
