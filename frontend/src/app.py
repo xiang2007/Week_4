@@ -37,7 +37,7 @@ async def convert_pdf(files: list[UploadFile] = File(...)):
     ]
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            "http://127.0.0.1:8080/process",
+            "http://127.0.0.1:8081/process",
             files=file_tuples
         )
 
@@ -51,3 +51,19 @@ async def convert_pdf(files: list[UploadFile] = File(...)):
             "Content-Disposition": "attachment; filename=tax_receipts.pdf"
         }
     )
+
+@app.post("/tax-summary") #add
+async def tax_summary(request: Request):
+    """Send selected receipt data to the backend for tax relief summary calculation."""
+    data = await request.json()
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "http://127.0.0.1:8081/tax-summary",
+            json=data
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="Backend tax summary failed")
+
+    return resp.json()
