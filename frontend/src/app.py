@@ -1,5 +1,6 @@
 import httpx
 import io
+import os
 
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "image"
+BACKEND_URL = os.environ["BACKEND_URL"].rstrip("/")
 
 
 def create_app() -> FastAPI:
@@ -21,6 +23,10 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(name="landing.html", request=request)
+
+    @app.get("/app", response_class=HTMLResponse)
+    async def app_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(name="index.html", request=request)
 
     return app
@@ -37,7 +43,7 @@ async def convert_pdf(files: list[UploadFile] = File(...)):
     ]
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            "http://127.0.0.1:8081/process",
+            f"{BACKEND_URL}/process",
             files=file_tuples
         )
 

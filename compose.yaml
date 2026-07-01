@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      PORT: ${BACKEND_PORT:?Set BACKEND_PORT}
+      HEALTHCHECK_HOST: ${HEALTHCHECK_HOST:?Set HEALTHCHECK_HOST}
+    ports:
+      - "${BACKEND_PORT:?Set BACKEND_PORT}:${BACKEND_PORT:?Set BACKEND_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os, socket; s = socket.create_connection((os.environ['HEALTHCHECK_HOST'], int(os.environ['PORT'])), timeout=2); s.close()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_URL: ${BACKEND_URL:?Set BACKEND_URL}
+      PORT: ${FRONTEND_PORT:?Set FRONTEND_PORT}
+    ports:
+      - "${FRONTEND_PORT:?Set FRONTEND_PORT}:${FRONTEND_PORT:?Set FRONTEND_PORT}"
+    depends_on:
+      backend:
+        condition: service_healthy
