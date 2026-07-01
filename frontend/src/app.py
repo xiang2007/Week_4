@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "image"
-BACKEND_URL = os.environ["BACKEND_URL"].rstrip("/")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080").rstrip("/")
 
 
 def create_app() -> FastAPI:
@@ -60,16 +60,76 @@ async def convert_pdf(files: list[UploadFile] = File(...)):
 
 @app.post("/tax-summary") #add
 async def tax_summary(request: Request):
-    """Send selected receipt data to the backend for tax relief summary calculation."""
-    data = await request.json()
+    """Read tax relief summary from the logged-in user's backend database."""
+    auth_header = request.headers.get("authorization")
+    data = None
+    if not auth_header:
+        data = await request.json()
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            "http://127.0.0.1:8081/tax-summary",
-            json=data
+            f"{BACKEND_URL}/tax-summary",
+            json=data,
+            headers={"Authorization": auth_header} if auth_header else None,
         )
 
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail="Backend tax summary failed")
+
+    return resp.json()
+
+
+@app.post("/auth/signup")
+async def signup(request: Request):
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{BACKEND_URL}/auth/signup", json=data)
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Signup failed"))
+
+    return resp.json()
+
+
+@app.post("/auth/login")
+async def login(request: Request):
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{BACKEND_URL}/auth/login", json=data)
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Login failed"))
+
+    return resp.json()
+
+
+@app.get("/receipts")
+async def get_receipts(request: Request):
+    auth_header = request.headers.get("authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{BACKEND_URL}/receipts",
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to load receipts"))
+
+    return resp.json()
+
+
+@app.post("/receipts")
+async def add_receipt(request: Request):
+    auth_header = request.headers.get("authorization")
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/receipts",
+            json=data,
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to save receipt"))
 
     return resp.json()
