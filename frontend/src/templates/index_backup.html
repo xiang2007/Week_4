@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tax Relief Receipt Manager</title>
-  <style>
-    *, *::before, *::after {
+
+  <!-- <style>
+    *,
+    *::before,
+    *::after {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
@@ -14,23 +18,502 @@
     :root {
       --primary: #6366f1;
       --primary-dark: #4f46e5;
-      --secondary: #8b5cf6;
       --success: #22c55e;
       --warning: #f59e0b;
       --danger: #ef4444;
-      --bg: linear-gradient(135deg, #f8fafc 0%, #eef2ff 48%, #faf5ff 100%);
-      --card: rgba(255, 255, 255, 0.88);
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 720px;
+    }
+
+    /* ── Stepper Nav ── */
+    .stepper {
+      display: flex;
+      gap: 0;
+      margin-bottom: 2rem;
+      padding: 0.5rem;
+      background: var(--card);
+      border-radius: 1rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    }
+
+    .step {
+      flex: 1;
+      text-align: center;
+      padding: 0.75rem 0.5rem;
+      border-bottom: 3px solid transparent;
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      user-select: none;
+    }
+
+    .step:hover {
+      color: var(--primary);
+    }
+
+    .step.active {
+      border-bottom-color: var(--primary);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .step.completed {
+      color: var(--success);
+    }
+
+    .step.completed::before {
+      content: '\2713 ';
+    }
+
+    /* ── Sections ── */
+    .section {
+      display: none;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    .section-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      color: var(--text);
+    }
+
+    /* ── Dropzone ── */
+    .dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 0.75rem;
+      padding: 2.5rem 1rem;
+      cursor: pointer;
+      text-align: center;
+      color: var(--muted);
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 1.5rem;
+    }
+
+    .dropzone:hover,
+    .dropzone.dragover {
+      border-color: var(--primary);
+      background: #eef2ff;
+    }
+
+    .dropzone svg {
+      margin-bottom: 0.5rem;
+    }
+
+    .dropzone span {
+      color: var(--primary);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    .dropzone small {
+      color: #9ca3af;
+    }
+
+    /* ── Receipt Cards ── */
+    .receipt-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 1rem;
+      align-items: start;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .receipt-card.confirmed {
+      border-color: var(--success);
+      background: #f0fdf4;
+    }
+
+    .receipt-thumb {
+      width: 64px;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 0.5rem;
+    }
+
+    .receipt-info {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .receipt-label {
+      font-weight: 600;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-success {
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .badge-pending {
+      background: #e0e7ff;
+      color: #3730a3;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .amount-input {
+      flex: 1;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      font-size: 0.95rem;
+    }
+
+    .amount-input:focus,
+    .category-select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, .15);
+    }
+
+    .category-select {
+      flex: 1.5;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      font-size: 0.95rem;
+      background: white;
+    }
+
+    .rm-prefix {
+      font-weight: 600;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 0.6rem 1.5rem;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.2s;
+      font-weight: 500;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+    }
+
+    .btn-primary:disabled {
+      background: #a5b4fc;
+      cursor: not-allowed;
+    }
+
+    .btn-sm {
+      padding: 0.4rem 0.75rem;
+      font-size: 0.85rem;
+    }
+
+    .btn-danger {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
+    .btn-danger:hover {
+      background: #fecaca;
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .btn-outline:hover {
+      background: #f9fafb;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    /* ── Confirmed List ── */
+    .confirmed-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    .confirmed-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: var(--card);
+      border: 1px solid var(--success);
+      border-radius: 9999px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.85rem;
+    }
+
+    .confirmed-pill img {
+      width: 28px;
+      height: 28px;
+      object-fit: cover;
+      border-radius: 4px;
+    }
+
+    .confirmed-pill .pill-cat {
+      color: var(--muted);
+    }
+
+    .confirmed-pill .pill-amt {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    /* ── Nav Buttons ── */
+    .nav-buttons {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Section 2: Summary ── */
+    .summary-header {
+      display: flex;
+      justify-content: space-around;
+      background: var(--card);
+      border-radius: 1rem;
+      padding: 1.25rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+      margin-bottom: 1.5rem;
+    }
+
+    .summary-stat {
+      text-align: center;
+    }
+
+    .summary-stat .label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+
+    .summary-stat .value {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    .summary-stat .value.primary {
+      color: var(--primary);
+    }
+
+    .summary-stat .value.success {
+      color: var(--success);
+    }
+
+    .category-bar {
+      background: var(--card);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+      margin-bottom: 0.75rem;
+    }
+
+    .bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.9rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .bar-label .cat-name {
+      font-weight: 600;
+    }
+
+    .bar-label .cat-amt {
+      color: var(--muted);
+    }
+
+    .bar-track {
+      height: 12px;
+      background: #e5e7eb;
+      border-radius: 9999px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 9999px;
+      transition: width 0.4s ease, background 0.3s;
+    }
+
+    .bar-fill.green {
+      background: var(--success);
+    }
+
+    .bar-fill.amber {
+      background: var(--warning);
+    }
+
+    .bar-fill.red {
+      background: var(--danger);
+    }
+
+    .bar-footer {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+
+    /* ── Section 3: PDF ── */
+    .pdf-section {
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+
+    .pdf-section p {
+      color: var(--muted);
+      margin-bottom: 1.5rem;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.5rem;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .error-msg {
+      background: #fef2f2;
+      color: var(--danger);
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      .receipt-card {
+        grid-template-columns: 1fr;
+      }
+
+      .receipt-thumb {
+        width: 100%;
+        height: 120px;
+      }
+
+      .input-row {
+        flex-direction: column;
+      }
+
+      .summary-header {
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+    }
+  </style> -->
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --primary: #6366f1;
+      --primary-dark: #4f46e5;
+      --primary-light: #eef2ff;
+      --secondary: #8b5cf6;
+      --success: #22c55e;
+      --success-soft: #dcfce7;
+      --warning: #f59e0b;
+      --warning-soft: #fef3c7;
+      --danger: #ef4444;
+      --danger-soft: #fee2e2;
+      --bg: linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #f5f3ff 100%);
+      --card: rgba(255, 255, 255, 0.85);
       --card-solid: #ffffff;
       --text: #0f172a;
       --muted: #64748b;
       --border: #e2e8f0;
-      --soft-purple: #eef2ff;
-      --soft-green: #f0fdf4;
-      --shadow-sm: 0 4px 16px rgba(15, 23, 42, 0.06);
-      --shadow-md: 0 14px 34px rgba(99, 102, 241, 0.14);
-      --shadow-lg: 0 22px 60px rgba(15, 23, 42, 0.12);
-      --radius-lg: 24px;
-      --radius-md: 18px;
+      --shadow-sm: 0 4px 14px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 12px 30px rgba(99, 102, 241, 0.12);
+      --shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.10);
+      --radius-lg: 22px;
+      --radius-md: 16px;
       --radius-sm: 12px;
     }
 
@@ -53,21 +536,21 @@
       width: 320px;
       height: 320px;
       border-radius: 50%;
-      filter: blur(90px);
-      opacity: 0.25;
+      filter: blur(80px);
+      opacity: 0.22;
       z-index: -1;
     }
 
     body::before {
       background: #6366f1;
-      top: -90px;
-      left: -100px;
+      top: -80px;
+      left: -80px;
     }
 
     body::after {
-      background: #a855f7;
-      bottom: -110px;
-      right: -90px;
+      background: #8b5cf6;
+      bottom: -100px;
+      right: -80px;
     }
 
     .container {
@@ -75,27 +558,15 @@
       max-width: 980px;
     }
 
-    .container::before {
-      content: "Smart Tax Relief Receipt Manager";
-      display: block;
-      font-size: 0.85rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--primary-dark);
-      font-weight: 800;
-      margin-bottom: 0.9rem;
-      text-align: center;
-    }
-
-    /* ── Stepper Nav ── */
+    /* Stepper */
     .stepper {
       display: flex;
       gap: 0.5rem;
       margin-bottom: 2rem;
       padding: 0.7rem;
       background: var(--card);
-      backdrop-filter: blur(18px);
-      border: 1px solid rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.7);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-md);
     }
@@ -104,9 +575,9 @@
       flex: 1;
       text-align: center;
       padding: 1rem 0.75rem;
-      border-radius: 16px;
+      border-radius: 14px;
       color: var(--muted);
-      font-weight: 700;
+      font-weight: 600;
       font-size: 0.95rem;
       cursor: pointer;
       transition: all 0.25s ease;
@@ -117,31 +588,30 @@
     .step:hover {
       background: #f8fafc;
       color: var(--primary);
-      transform: translateY(-1px);
     }
 
     .step.active {
-      background: linear-gradient(135deg, #eef2ff 0%, #faf5ff 100%);
+      background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
       color: var(--primary);
       box-shadow: inset 0 -3px 0 var(--primary);
     }
 
     .step.completed {
-      color: #16a34a;
-      background: var(--soft-green);
+      color: var(--success);
+      background: #f0fdf4;
     }
 
     .step.completed::before {
       content: "✓ ";
-      font-weight: 900;
+      font-weight: 700;
     }
 
-    /* ── Sections ── */
+    /* Sections */
     .section {
       display: none;
       background: var(--card);
-      backdrop-filter: blur(18px);
-      border: 1px solid rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.7);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-lg);
       padding: 2rem;
@@ -153,66 +623,70 @@
     }
 
     @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .section-title {
       font-size: 2rem;
-      font-weight: 900;
-      margin-bottom: 0.45rem;
+      font-weight: 800;
+      margin-bottom: 0.4rem;
       color: var(--text);
-      letter-spacing: -0.03em;
+      letter-spacing: -0.02em;
     }
 
     .section-subtitle {
       color: var(--muted);
       font-size: 1rem;
-      margin-bottom: 1.65rem;
+      margin-bottom: 1.6rem;
       line-height: 1.6;
-      max-width: 760px;
     }
 
-    /* ── Dropzone ── */
+    /* Dropzone */
     .dropzone {
       border: 2px dashed #cbd5e1;
       border-radius: var(--radius-md);
-      padding: 3.25rem 1.25rem;
+      padding: 3rem 1.25rem;
       cursor: pointer;
       text-align: center;
       color: var(--muted);
       transition: all 0.25s ease;
       margin-bottom: 1.75rem;
       background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
     }
 
     .dropzone:hover,
     .dropzone.dragover {
       border-color: var(--primary);
-      background: linear-gradient(180deg, #eef2ff 0%, #ffffff 100%);
+      background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 100%);
       box-shadow: var(--shadow-sm);
       transform: translateY(-2px);
     }
 
     .dropzone svg {
       margin-bottom: 0.8rem;
-      filter: drop-shadow(0 4px 10px rgba(99, 102, 241, 0.14));
     }
 
     .dropzone span {
       color: var(--primary);
-      font-weight: 800;
+      font-weight: 600;
       text-decoration: none;
     }
 
     .dropzone small {
       display: block;
-      margin-top: 0.4rem;
+      margin-top: 0.35rem;
       color: #94a3b8;
     }
 
-    /* ── Receipt Cards ── */
+    /* Receipt cards */
     .receipt-card {
       background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
       border: 1px solid var(--border);
@@ -220,7 +694,7 @@
       padding: 1rem;
       margin-bottom: 1rem;
       display: grid;
-      grid-template-columns: 76px 1fr;
+      grid-template-columns: 74px 1fr;
       gap: 1rem;
       align-items: start;
       transition: all 0.25s ease;
@@ -239,10 +713,10 @@
     }
 
     .receipt-thumb {
-      width: 76px;
-      height: 76px;
+      width: 74px;
+      height: 74px;
       object-fit: cover;
-      border-radius: 14px;
+      border-radius: 12px;
       border: 1px solid #dbeafe;
       background: #fff;
     }
@@ -254,7 +728,7 @@
     }
 
     .receipt-label {
-      font-weight: 800;
+      font-weight: 700;
       font-size: 0.95rem;
       display: flex;
       align-items: center;
@@ -267,11 +741,18 @@
       padding: 0.3rem 0.7rem;
       border-radius: 9999px;
       font-size: 0.78rem;
-      font-weight: 800;
+      font-weight: 700;
     }
 
-    .badge-success { background: #dcfce7; color: #166534; }
-    .badge-pending { background: #e0e7ff; color: #3730a3; }
+    .badge-success {
+      background: var(--success-soft);
+      color: #166534;
+    }
+
+    .badge-pending {
+      background: #e0e7ff;
+      color: #3730a3;
+    }
 
     .input-row {
       display: flex;
@@ -281,43 +762,50 @@
 
     .amount-input,
     .category-select {
-      padding: 0.78rem 0.9rem;
+      padding: 0.75rem 0.9rem;
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: 12px;
       font-size: 0.95rem;
       background: #fff;
       transition: all 0.2s ease;
     }
 
-    .amount-input { flex: 1; }
-    .category-select { flex: 1.7; }
+    .amount-input {
+      flex: 1;
+    }
+
+    .category-select {
+      flex: 1.7;
+    }
 
     .amount-input:focus,
     .category-select:focus {
       outline: none;
       border-color: var(--primary);
-      box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.13);
+      box-shadow: 0 0 0 4px rgba(99, 102, 241, .12);
     }
 
     .rm-prefix {
-      font-weight: 900;
+      font-weight: 700;
       color: var(--muted);
       font-size: 0.95rem;
     }
 
-    /* ── Buttons ── */
+    /* Buttons */
     .btn {
-      padding: 0.78rem 1.4rem;
+      padding: 0.75rem 1.35rem;
       border: none;
       border-radius: 14px;
       font-size: 0.95rem;
       cursor: pointer;
       transition: all 0.22s ease;
-      font-weight: 800;
+      font-weight: 700;
       box-shadow: var(--shadow-sm);
     }
 
-    .btn:hover { transform: translateY(-1px); }
+    .btn:hover {
+      transform: translateY(-1px);
+    }
 
     .btn-primary {
       background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
@@ -325,31 +813,31 @@
     }
 
     .btn-primary:hover {
-      box-shadow: 0 14px 26px rgba(99, 102, 241, 0.24);
+      box-shadow: 0 12px 24px rgba(99, 102, 241, 0.22);
     }
 
-    .btn-primary:disabled,
-    .btn:disabled {
+    .btn-primary:disabled {
       background: #c7d2fe;
       color: white;
       cursor: not-allowed;
       box-shadow: none;
       transform: none;
-      opacity: 0.65;
     }
 
     .btn-sm {
-      padding: 0.56rem 0.95rem;
+      padding: 0.55rem 0.95rem;
       font-size: 0.88rem;
       border-radius: 12px;
     }
 
     .btn-danger {
-      background: #fee2e2;
+      background: var(--danger-soft);
       color: #dc2626;
     }
 
-    .btn-danger:hover { background: #fecaca; }
+    .btn-danger:hover {
+      background: #fecaca;
+    }
 
     .btn-outline {
       background: #ffffff;
@@ -357,7 +845,9 @@
       color: var(--muted);
     }
 
-    .btn-outline:hover { background: #f8fafc; }
+    .btn-outline:hover {
+      background: #f8fafc;
+    }
 
     .action-row {
       display: flex;
@@ -365,7 +855,7 @@
       margin-top: 0.2rem;
     }
 
-    /* ── Confirmed List ── */
+    /* Confirmed list */
     .confirmed-list {
       display: flex;
       flex-wrap: wrap;
@@ -388,17 +878,23 @@
     }
 
     .confirmed-pill img {
-      width: 32px;
-      height: 32px;
+      width: 30px;
+      height: 30px;
       object-fit: cover;
-      border-radius: 9px;
+      border-radius: 8px;
       border: 1px solid #dcfce7;
     }
 
-    .confirmed-pill .pill-cat { color: var(--muted); }
-    .confirmed-pill .pill-amt { font-weight: 900; color: var(--text); }
+    .confirmed-pill .pill-cat {
+      color: var(--muted);
+    }
 
-    /* ── Nav Buttons ── */
+    .confirmed-pill .pill-amt {
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    /* Nav buttons */
     .nav-buttons {
       display: flex;
       justify-content: space-between;
@@ -408,7 +904,7 @@
       border-top: 1px solid #e5e7eb;
     }
 
-    /* ── Section 2: Summary ── */
+    /* Summary */
     .summary-header {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -421,38 +917,30 @@
       background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
-      padding: 1.45rem;
+      padding: 1.4rem;
       box-shadow: var(--shadow-sm);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .summary-stat::after {
-      content: "";
-      position: absolute;
-      width: 110px;
-      height: 110px;
-      border-radius: 50%;
-      right: -45px;
-      top: -45px;
-      background: rgba(99, 102, 241, 0.09);
     }
 
     .summary-stat .label {
       font-size: 0.9rem;
       color: var(--muted);
-      margin-bottom: 0.55rem;
-      font-weight: 700;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
     }
 
     .summary-stat .value {
       font-size: 2rem;
-      font-weight: 900;
-      letter-spacing: -0.03em;
+      font-weight: 800;
+      letter-spacing: -0.02em;
     }
 
-    .summary-stat .value.primary { color: var(--primary); }
-    .summary-stat .value.success { color: var(--success); }
+    .summary-stat .value.primary {
+      color: var(--primary);
+    }
+
+    .summary-stat .value.success {
+      color: var(--success);
+    }
 
     .category-bar {
       background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
@@ -473,13 +961,13 @@
     }
 
     .bar-label .cat-name {
-      font-weight: 800;
+      font-weight: 700;
       color: var(--text);
     }
 
     .bar-label .cat-amt {
       color: var(--muted);
-      font-weight: 800;
+      font-weight: 700;
     }
 
     .bar-track {
@@ -495,9 +983,17 @@
       transition: width 0.4s ease;
     }
 
-    .bar-fill.green { background: linear-gradient(90deg, #22c55e, #4ade80); }
-    .bar-fill.amber { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
-    .bar-fill.red { background: linear-gradient(90deg, #ef4444, #f87171); }
+    .bar-fill.green {
+      background: linear-gradient(90deg, #22c55e, #4ade80);
+    }
+
+    .bar-fill.amber {
+      background: linear-gradient(90deg, #f59e0b, #fbbf24);
+    }
+
+    .bar-fill.red {
+      background: linear-gradient(90deg, #ef4444, #f87171);
+    }
 
     .bar-footer {
       display: flex;
@@ -509,7 +1005,7 @@
       flex-wrap: wrap;
     }
 
-    /* ── Section 3: PDF ── */
+    /* PDF section */
     .pdf-section {
       text-align: center;
       padding: 2.75rem 1rem 2.25rem;
@@ -517,13 +1013,6 @@
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
       box-shadow: var(--shadow-sm);
-    }
-
-    .pdf-section::before {
-      content: "📄";
-      display: block;
-      font-size: 3rem;
-      margin-bottom: 0.8rem;
     }
 
     .pdf-section p {
@@ -545,7 +1034,11 @@
       margin-right: 0.5rem;
     }
 
-    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
 
     .error-msg {
       background: #fef2f2;
@@ -565,27 +1058,67 @@
       border-radius: 12px;
     }
 
-    /* ── Responsive ── */
+    /* Responsive */
     @media (max-width: 768px) {
-      body { padding: 1.5rem 0.8rem; }
-      .section { padding: 1.25rem; }
-      .section-title { font-size: 1.6rem; }
-      .summary-header { grid-template-columns: 1fr; }
-      .stepper { flex-direction: column; }
-      .step { text-align: left; }
+      .section {
+        padding: 1.25rem;
+      }
+
+      .section-title {
+        font-size: 1.6rem;
+      }
+
+      .summary-header {
+        grid-template-columns: 1fr;
+      }
+
+      .stepper {
+        flex-direction: column;
+      }
+
+      .step {
+        text-align: left;
+      }
     }
 
     @media (max-width: 520px) {
-      .receipt-card { grid-template-columns: 1fr; }
-      .receipt-thumb { width: 100%; height: 150px; }
-      .input-row { flex-direction: column; align-items: stretch; }
-      .action-row { flex-wrap: wrap; }
-      .nav-buttons { flex-direction: column; gap: 0.8rem; align-items: stretch; }
-      .nav-buttons .btn { width: 100%; }
-      .bar-label, .bar-footer { flex-direction: column; align-items: flex-start; }
+      .receipt-card {
+        grid-template-columns: 1fr;
+      }
+
+      .receipt-thumb {
+        width: 100%;
+        height: 150px;
+      }
+
+      .input-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .action-row {
+        flex-wrap: wrap;
+      }
+
+      .nav-buttons {
+        flex-direction: column;
+        gap: 0.8rem;
+        align-items: stretch;
+      }
+
+      .nav-buttons .btn {
+        width: 100%;
+      }
+
+      .bar-label,
+      .bar-footer {
+        flex-direction: column;
+        align-items: flex-start;
+      }
     }
   </style>
 </head>
+
 <body>
   <div class="container">
     <!-- Stepper Navigation -->
@@ -598,11 +1131,16 @@
     <!-- ═══════ SECTION 1: Upload & Categorize ═══════ -->
     <div class="section active" id="section-1">
       <h2 class="section-title">Upload &amp; Categorize Receipts</h2>
-      <p class="section-subtitle">Upload receipt images, enter the claimed amount, and assign each item to the correct tax relief category.</p>
+      <p class="section-subtitle">
+        Upload your receipt images, enter the claimed amount, and assign each receipt to the most relevant tax relief
+        category.
+      </p>
 
       <div class="dropzone" id="dropzone">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/>
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#9ca3af"
+          stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
         </svg>
         <br>
         <span>Click to browse</span> or drag &amp; drop receipt images
@@ -623,7 +1161,10 @@
     <!-- ═══════ SECTION 2: Tax Relief Summary ═══════ -->
     <div class="section" id="section-2">
       <h2 class="section-title">Tax Relief Summary</h2>
-      <p class="section-subtitle">Review your total claimed amount, remaining relief capacity, and category usage before generating your PDF record.</p>
+      <p class="section-subtitle">
+        Review your total claimed amount, remaining tax relief capacity, and category usage before generating your PDF
+        record.
+      </p>
 
       <div class="summary-header" id="summary-header">
         <div class="summary-stat">
@@ -647,7 +1188,9 @@
     <!-- ═══════ SECTION 3: Convert to PDF ═══════ -->
     <div class="section" id="section-3">
       <h2 class="section-title">Convert Receipts to PDF</h2>
-      <p class="section-subtitle">Combine all confirmed receipt images into a single PDF document for tax preparation and record keeping.</p>
+      <p class="section-subtitle">
+        Combine all confirmed receipt images into a single PDF document for tax preparation and record keeping.
+      </p>
 
       <div class="pdf-section">
         <p id="pdf-info"></p>
@@ -671,17 +1214,17 @@
   <script>
     // ── Malaysian Tax Relief Categories ──
     const TAX_RELIEF_CATEGORIES = [
-      { key: "education",              label: "Education",                      limit: 7000 },
-      { key: "book_resources",         label: "Book & Educational Resources",   limit: 1000 },
-      { key: "it_equipment",           label: "IT Equipment / Devices",         limit: 3000 },
-      { key: "medical",                label: "Medical Expenses",               limit: 15000 },
-      { key: "selfemployed",           label: "Self-Employed / Professional Fees", limit: 2500 },
-      { key: "insurance",              label: "Insurance Premiums",             limit: 3000 },
-      { key: "life_insurance",         label: "Life Insurance",                 limit: 3000 },
-      { key: "retirement",             label: "Retirement Contributions (CPF/EWK)", limit: Infinity },
-      { key: "healthcare",             label: "Healthcare",                     limit: 3000 },
-      { key: "renewable_energy",       label: "Renewable Energy Equipment",     limit: 800 },
-      { key: "residential",            label: "Residential Accommodation",      limit: 2500 },
+      { key: "education", label: "Education", limit: 7000 },
+      { key: "book_resources", label: "Book & Educational Resources", limit: 1000 },
+      { key: "it_equipment", label: "IT Equipment / Devices", limit: 3000 },
+      { key: "medical", label: "Medical Expenses", limit: 15000 },
+      { key: "selfemployed", label: "Self-Employed / Professional Fees", limit: 2500 },
+      { key: "insurance", label: "Insurance Premiums", limit: 3000 },
+      { key: "life_insurance", label: "Life Insurance", limit: 3000 },
+      { key: "retirement", label: "Retirement Contributions (CPF/EWK)", limit: Infinity },
+      { key: "healthcare", label: "Healthcare", limit: 3000 },
+      { key: "renewable_energy", label: "Renewable Energy Equipment", limit: 800 },
+      { key: "residential", label: "Residential Accommodation", limit: 2500 },
     ];
 
     // ── State ──
@@ -852,7 +1395,71 @@
     }
 
     // ── Section 2: Render Summary ──
-    async function renderSummary() {
+
+    // function renderSummary() {
+    //   const confirmed = state.receipts.filter(r => r.confirmed);
+    //   if (confirmed.length === 0) {
+    //     summaryHeaderEl.innerHTML = '<p style="color:var(--muted);text-align:center;padding:2rem;">No receipts confirmed yet.</p>';
+    //     categoryBarsEl.innerHTML = '';
+    //     return;
+    //   }
+
+    //   // Aggregate by category
+    //   const aggregated = {};
+    //   for (const r of confirmed) {
+    //     if (!aggregated[r.categoryKey]) {
+    //       aggregated[r.categoryKey] = 0;
+    //     }
+    //     aggregated[r.categoryKey] += r.amount;
+    //   }
+
+    //   const totalClaimed = confirmed.reduce((s, r) => s + r.amount, 0);
+
+    //   // Compute total limit of categories that have a finite limit
+    //   const totalLimit = new Set(Object.keys(aggregated))
+    //     .reduce((s, key) => {
+    //       const cat = getCategoryByKey(key);
+    //       return s + (cat && cat.limit !== Infinity ? cat.limit : 0);
+    //     }, 0);
+    //   const totalRemaining = Math.max(0, totalLimit - totalClaimed);
+
+    //   totalClaimedEl.textContent = fmt(totalClaimed);
+    //   totalRemainingEl.textContent = fmt(totalRemaining);
+
+    //   // Render category bars sorted by usage % desc
+    //   const entries = Object.entries(aggregated)
+    //     .map(([key, amt]) => {
+    //       const cat = getCategoryByKey(key);
+    //       const pct = cat && cat.limit !== Infinity ? (amt / cat.limit) * 100 : 0;
+    //       return { key, cat, amt, pct };
+    //     })
+    //     .sort((a, b) => b.pct - a.pct);
+
+    //   categoryBarsEl.innerHTML = '';
+    //   for (const { key, cat, amt, pct } of entries) {
+    //     const bar = document.createElement('div');
+    //     bar.className = 'category-bar';
+    //     const displayPct = Math.min(pct, 100);
+    //     const colorClass = pct >= 100 ? 'red' : pct >= 80 ? 'amber' : 'green';
+    //     const remaining = cat && cat.limit !== Infinity ? Math.max(0, cat.limit - amt) : 'No limit';
+    //     bar.innerHTML = `
+    //       <div class="bar-label">
+    //         <span class="cat-name">${cat ? cat.label : key}</span>
+    //         <span class="cat-amt">${fmt(amt)}</span>
+    //       </div>
+    //       <div class="bar-track">
+    //         <div class="bar-fill ${colorClass}" style="width: ${displayPct}%"></div>
+    //       </div>
+    //       <div class="bar-footer">
+    //         <span>${cat && cat.limit !== Infinity ? 'Limit: ' + fmt(cat.limit) : 'No limit'}</span>
+    //         <span>Remaining: ${typeof remaining === 'number' ? fmt(remaining) : remaining}</span>
+    //       </div>
+    //     `;
+    //     categoryBarsEl.appendChild(bar);
+    //   }
+    // }
+
+    async function renderSummary() { // add
       const confirmed = state.receipts.filter(r => r.confirmed);
 
       if (confirmed.length === 0) {
@@ -897,29 +1504,31 @@
           const colorClass = item.percentage >= 100 ? 'red' : item.percentage >= 80 ? 'amber' : 'green';
 
           bar.innerHTML = `
-            <div class="bar-label">
-              <span class="cat-name">${item.category_label}</span>
-              <span class="cat-amt">${fmt(item.amount)}</span>
-            </div>
-            <div class="bar-track">
-              <div class="bar-fill ${colorClass}" style="width: ${displayPct}%"></div>
-            </div>
-            <div class="bar-footer">
-              <span>${item.limit === null ? 'No limit' : 'Limit: ' + fmt(item.limit)}</span>
-              <span>Remaining: ${item.remaining === null ? 'No limit' : fmt(item.remaining)}</span>
-            </div>
-          `;
+        <div class="bar-label">
+          <span class="cat-name">${item.category_label}</span>
+          <span class="cat-amt">${fmt(item.amount)}</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill ${colorClass}" style="width: ${displayPct}%"></div>
+        </div>
+        <div class="bar-footer">
+          <span>${item.limit === null ? 'No limit' : 'Limit: ' + fmt(item.limit)}</span>
+          <span>Remaining: ${item.remaining === null ? 'No limit' : fmt(item.remaining)}</span>
+        </div>
+      `;
 
           categoryBarsEl.appendChild(bar);
         }
       } catch (err) {
         categoryBarsEl.innerHTML = `
-          <div class="error-msg">
-            Failed to calculate tax relief summary: ${err.message}
-          </div>
-        `;
+      <div class="error-msg">
+        Failed to calculate tax relief summary: ${err.message}
+      </div>
+    `;
       }
     }
+
+
 
     // ── Section 3: Render PDF Info ──
     function renderPdfSection() {
@@ -1009,4 +1618,5 @@
     });
   </script>
 </body>
+
 </html>
