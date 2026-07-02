@@ -29,6 +29,10 @@ def create_app() -> FastAPI:
     async def app_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(name="index.html", request=request)
 
+    @app.get("/admin", response_class=HTMLResponse)
+    async def admin_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(name="admin.html", request=request)
+
     return app
 
 
@@ -103,6 +107,50 @@ async def login(request: Request):
     return resp.json()
 
 
+@app.post("/admin/auth/login")
+async def admin_login(request: Request):
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{BACKEND_URL}/admin/auth/login", json=data)
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Admin login failed"))
+
+    return resp.json()
+
+
+@app.get("/admin/accounts")
+async def admin_accounts(request: Request):
+    auth_header = request.headers.get("authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{BACKEND_URL}/admin/accounts",
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to load accounts"))
+
+    return resp.json()
+
+
+@app.post("/admin/accounts/reset-password")
+async def admin_reset_password(request: Request):
+    auth_header = request.headers.get("authorization")
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/admin/accounts/reset-password",
+            json=data,
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to reset password"))
+
+    return resp.json()
+
+
 @app.get("/receipts")
 async def get_receipts(request: Request):
     auth_header = request.headers.get("authorization")
@@ -131,5 +179,20 @@ async def add_receipt(request: Request):
 
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to save receipt"))
+
+    return resp.json()
+
+
+@app.delete("/receipts/{receipt_id}")
+async def delete_receipt(receipt_id: int, request: Request):
+    auth_header = request.headers.get("authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(
+            f"{BACKEND_URL}/receipts/{receipt_id}",
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to delete receipt"))
 
     return resp.json()

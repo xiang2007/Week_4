@@ -546,6 +546,24 @@
     .confirmed-pill .pill-cat { color: var(--ink-soft); }
     .confirmed-pill .pill-amt { font-weight: 700; color: var(--mint-dark); }
 
+    .pill-delete {
+      width: 28px;
+      height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 50%;
+      background: #FBEAE6;
+      color: var(--stamp-dark);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      font-weight: 700;
+    }
+
+    .pill-delete:hover { background: #F5D8D1; }
+
     /* ── Nav Buttons ── */
     .nav-buttons {
       display: flex;
@@ -934,6 +952,7 @@
       state.accountName = '';
       state.receipts = [];
       state.nextId = 1;
+      fileInput.value = '';
       localStorage.removeItem('receiptManagerToken');
       localStorage.removeItem('receiptManagerAccount');
       document.body.classList.remove('authenticated');
@@ -941,6 +960,13 @@
       renderPending();
       renderConfirmed();
       updateNavButtons();
+      totalClaimedEl.textContent = fmt(0);
+      totalRemainingEl.textContent = fmt(0);
+      categoryBarsEl.innerHTML = '';
+      pdfInfo.textContent = '';
+      pdfError.style.display = 'none';
+      pdfSuccess.style.display = 'none';
+      pdfLoading.style.display = 'none';
       navigateToSection(1);
     }
 
@@ -1122,8 +1148,10 @@
           <span>#${r.receiptNumber || r.id}</span>
           <span>${cat ? cat.label : '?'}</span>
           <span class="pill-amt">${fmt(r.amount)}</span>
+          <button class="pill-delete" type="button" aria-label="Delete receipt #${r.receiptNumber || r.id}" data-id="${r.id}">&times;</button>
         `;
         confirmedList.appendChild(pill);
+        pill.querySelector('.pill-delete').addEventListener('click', () => deleteReceipt(r.id));
       }
     }
 
@@ -1177,6 +1205,34 @@
       if (el) el.remove();
       renderConfirmed();
       updateNavButtons();
+    }
+
+    async function deleteReceipt(id) {
+      const receipt = state.receipts.find(r => r.id === id);
+      if (!receipt) return;
+
+      try {
+        if (receipt.confirmed) {
+          const resp = await fetch(`/receipts/${id}`, {
+            method: 'DELETE',
+            headers: authHeaders(),
+          });
+          const data = await resp.json();
+
+          if (!resp.ok) {
+            throw new Error(data.detail || `Server responded with ${resp.status}`);
+          }
+        }
+
+        state.receipts = state.receipts.filter(r => r.id !== id);
+        renderPending();
+        renderConfirmed();
+        updateNavButtons();
+        if (state.currentSection === 2) renderSummary();
+        if (state.currentSection === 3) renderPdfSection();
+      } catch (err) {
+        alert(`Failed to delete receipt: ${err.message}`);
+      }
     }
 
     function updateNavButtons() {

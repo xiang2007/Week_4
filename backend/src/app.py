@@ -16,6 +16,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 ACCOUNTS_DB = DATA_DIR / "accounts.db"
 AUTH_TOKENS: dict[str, str] = {}
+ADMIN_TOKENS: set[str] = set()
+ADMIN_ACCOUNT_NAME = "admin"
+ADMIN_PASSWORD = "admin"
 
 
 def hash_password(password: str) -> str:
@@ -80,6 +83,15 @@ def require_user(authorization: Optional[str]) -> str:
     return account_name
 
 
+def require_admin(authorization: Optional[str]) -> None:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Admin login required")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    if token not in ADMIN_TOKENS:
+        raise HTTPException(status_code=401, detail="Invalid or expired admin login")
+
+
 def calculate_summary(receipts: list["ReceiptItem"]):
     aggregated = {}
 
@@ -95,8 +107,8 @@ def calculate_summary(receipts: list["ReceiptItem"]):
 
         aggregated[receipt.categoryKey] += receipt.amount
 
-    total_claimed = sum(aggregated.values())
-    total_limit = 0
+    total_claimed = 0
+    total_remaining = 0
     category_results = []
 
     for category_key, amount in aggregated.items():
@@ -106,21 +118,24 @@ def calculate_summary(receipts: list["ReceiptItem"]):
         if limit is None:
             remaining = None
             percentage = 0
+            claimable_amount = amount
         else:
-            total_limit += limit
             remaining = max(0, limit - amount)
+            total_remaining += remaining
             percentage = min((amount / limit) * 100, 100)
+            claimable_amount = min(amount, limit)
+
+        total_claimed += claimable_amount
 
         category_results.append({
             "category_key": category_key,
             "category_label": category["label"],
             "amount": amount,
+            "claimable_amount": claimable_amount,
             "limit": limit,
             "remaining": remaining,
             "percentage": percentage,
         })
-
-    total_remaining = max(0, total_limit - total_claimed)
 
     return {
         "total_claimed": total_claimed,
@@ -140,6 +155,16 @@ class TaxSummaryRequest(BaseModel):
 class AuthRequest(BaseModel):
     accountName: str
     password: str
+
+
+class AdminAuthRequest(BaseModel):
+    accountName: str
+    password: str
+
+
+class AdminPasswordResetRequest(BaseModel):
+    accountName: str
+    newPassword: str
 
 
 class ReceiptCreate(BaseModel):
@@ -224,6 +249,68 @@ def create_backend() -> FastAPI:
         AUTH_TOKENS[token] = account_name
         return {"token": token, "account_name": account_name}
 
+    @app.post("/admin/auth/login")
+    async def admin_login(payload: AdminAuthRequest):
+        if not (
+            secrets.compare_digest(payload.accountName, ADMIN_ACCOUNT_NAME)
+            and secrets.compare_digest(payload.password, ADMIN_PASSWORD)
+        ):
+            raise HTTPException(status_code=401, detail="Invalid admin account name or password")
+
+        token = secrets.token_urlsafe(32)
+        ADMIN_TOKENS.add(token)
+        return {"token": token, "account_name": ADMIN_ACCOUNT_NAME}
+
+    @app.get("/admin/accounts")
+    async def admin_accounts(authorization: Optional[str] = Header(default=None)):
+        require_admin(authorization)
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT account_name, created_at
+                FROM accounts
+                ORDER BY created_at DESC, account_name
+                """
+            ).fetchall()
+
+        return {
+            "accounts": [
+                {
+                    "account_name": row["account_name"],
+                    "password": "Not stored in readable form",
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+        }
+
+    @app.post("/admin/accounts/reset-password")
+    async def admin_reset_password(
+        payload: AdminPasswordResetRequest,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        require_admin(authorization)
+        account_name = validate_account_name(payload.accountName)
+
+        if len(payload.newPassword) < 6:
+            raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE accounts
+                SET password_sha256 = ?
+                WHERE account_name = ?
+                """,
+                (hash_password(payload.newPassword), account_name),
+            )
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        return {"updated": True, "account_name": account_name}
+
     @app.get("/receipts")
     async def get_receipts(authorization: Optional[str] = Header(default=None)):
         account_name = require_user(authorization)
@@ -282,6 +369,25 @@ def create_backend() -> FastAPI:
             receipt_id = cursor.lastrowid
 
         return {"id": receipt_id}
+
+    @app.delete("/receipts/{receipt_id}")
+    async def delete_receipt(
+        receipt_id: int,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        account_name = require_user(authorization)
+        init_user_db(account_name)
+
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            cursor = conn.execute(
+                "DELETE FROM receipts WHERE id = ?",
+                (receipt_id,),
+            )
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Receipt not found")
+
+        return {"deleted": True}
     
     @app.post("/tax-summary") #added
     async def tax_summary(
