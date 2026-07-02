@@ -26,6 +26,9 @@ ADMIN_ACCOUNT_NAME = "admin"
 ADMIN_PASSWORD = "admin"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+OCR_PROVIDER = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
+if OCR_PROVIDER not in {"manual", "gemini", "paddle"}:
+    OCR_PROVIDER = "gemini"
 
 
 def hash_password(password: str) -> str:
@@ -217,6 +220,19 @@ class AiChatRequest(BaseModel):
     message: str
 
 
+def empty_receipt_extract(provider: str, message: str) -> dict:
+    return {
+        "title": "",
+        "receiptDate": "",
+        "amount": 0,
+        "categoryKey": "",
+        "confidence": 0,
+        "needsReview": True,
+        "provider": provider,
+        "message": message,
+    }
+
+
 TAX_RELIEF_CATEGORIES = {
     "education": {"label": "Education", "limit": 7000},
     "book_resources": {"label": "Book & Educational Resources", "limit": 1000},
@@ -374,16 +390,9 @@ def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
 
 
 def generate_gemini_receipt_extract(image_data_url: str) -> dict:
-    fallback = {
-        "title": "",
-        "receiptDate": "",
-        "amount": 0,
-        "categoryKey": "",
-        "confidence": 0,
-        "needsReview": True,
-    }
+    fallback = empty_receipt_extract("gemini", "Gemini could not extract this receipt.")
     if not GEMINI_API_KEY:
-        return fallback
+        return empty_receipt_extract("gemini", "Gemini API key is not set.")
 
     match = re.fullmatch(r"data:(image/(?:png|jpeg|jpg));base64,(.+)", image_data_url)
     if not match:
@@ -433,9 +442,26 @@ def generate_gemini_receipt_extract(image_data_url: str) -> dict:
             "categoryKey": category_key,
             "confidence": max(0, min(1, float(parsed.get("confidence") or 0))),
             "needsReview": bool(parsed.get("needsReview", True)),
+            "provider": "gemini",
+            "message": "",
         }
     except (urllib.error.URLError, KeyError, ValueError, json.JSONDecodeError, TimeoutError):
         return fallback
+
+
+def generate_paddle_receipt_extract(image_data_url: str) -> dict:
+    return empty_receipt_extract(
+        "paddle",
+        "PaddleOCR local extraction is selected, but the PaddleOCR runtime is not installed in this Docker image yet.",
+    )
+
+
+def generate_receipt_extract(image_data_url: str) -> dict:
+    if OCR_PROVIDER == "manual":
+        return empty_receipt_extract("manual", "OCR is disabled. Fill in the receipt fields manually.")
+    if OCR_PROVIDER == "paddle":
+        return generate_paddle_receipt_extract(image_data_url)
+    return generate_gemini_receipt_extract(image_data_url)
 
 
 def clear_ai_summary_cache(conn: sqlite3.Connection) -> None:
@@ -638,6 +664,20 @@ def create_backend() -> FastAPI:
             ]
         }
 
+    @app.get("/ocr-config")
+    async def ocr_config(authorization: Optional[str] = Header(default=None)):
+        require_user(authorization)
+        provider_labels = {
+            "manual": "Manual entry",
+            "gemini": "Gemini Vision",
+            "paddle": "PaddleOCR local",
+        }
+        return {
+            "provider": OCR_PROVIDER,
+            "label": provider_labels.get(OCR_PROVIDER, "Gemini Vision"),
+            "enabled": OCR_PROVIDER != "manual",
+        }
+
     @app.post("/receipts")
     async def add_receipt(
         payload: ReceiptCreate,
@@ -732,7 +772,7 @@ def create_backend() -> FastAPI:
         authorization: Optional[str] = Header(default=None),
     ):
         require_user(authorization)
-        return generate_gemini_receipt_extract(payload.imageDataUrl)
+        return generate_receipt_extract(payload.imageDataUrl)
 
     @app.delete("/receipts/{receipt_id}")
     async def delete_receipt(

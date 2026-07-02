@@ -197,6 +197,21 @@ async def get_receipts(request: Request):
     return response_data(resp)
 
 
+@app.get("/ocr-config")
+async def ocr_config(request: Request):
+    auth_header = request.headers.get("authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{BACKEND_URL}/ocr-config",
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load OCR settings"))
+
+    return response_data(resp)
+
+
 @app.get("/ai-summary")
 async def ai_summary(request: Request):
     auth_header = request.headers.get("authorization")

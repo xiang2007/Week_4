@@ -671,6 +671,70 @@ body.authenticated .app-shell {
   margin-top: 1rem;
 }
 
+.planner-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+  gap: 1rem;
+}
+
+.planner-form-panel,
+.planner-results-panel {
+  padding: 1rem;
+}
+
+.planner-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.helper-text {
+  margin: 0.85rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.claimed-category-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.claimed-category-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 66px;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.claimed-category-row strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+}
+
+.claimed-category-row span {
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+}
+
+.claimed-category-row > strong {
+  color: var(--brand-deep);
+  white-space: nowrap;
+}
+
+.planner-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
 .mini-panel {
   padding: 1rem;
 }
@@ -1285,6 +1349,9 @@ body.authenticated:not(.uploading) .advisor-chat {
   .dashboard-grid,
   .insight-grid,
   .metric-grid,
+  .planner-grid,
+  .planner-metrics,
+  .planner-input-grid,
   .donut-wrap,
   .receipt-card,
   .landing-hero,
@@ -1308,6 +1375,7 @@ body.authenticated:not(.uploading) .advisor-chat {
   .product-preview {
     max-width: 560px;
   }
+
 }
 
 @media (max-width: 640px) {
@@ -1351,6 +1419,10 @@ body.authenticated:not(.uploading) .advisor-chat {
   }
 
   .preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .claimed-category-row {
     grid-template-columns: 1fr;
   }
 

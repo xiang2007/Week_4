@@ -39,6 +39,30 @@
     const todayIso = () => new Date().toISOString().slice(0, 10);
     const categoryByKey = key => TAX_RELIEF_CATEGORIES.find(c => c.key === key);
     const authHeaders = token => ({ Authorization: `Bearer ${token}` });
+    const RESIDENT_TAX_BRACKETS = [
+      { upTo: 5000, base: 0, rate: 0 },
+      { upTo: 20000, base: 0, rate: 0.01 },
+      { upTo: 35000, base: 150, rate: 0.03 },
+      { upTo: 50000, base: 600, rate: 0.06 },
+      { upTo: 70000, base: 1500, rate: 0.11 },
+      { upTo: 100000, base: 3700, rate: 0.19 },
+      { upTo: 400000, base: 9400, rate: 0.25 },
+      { upTo: 600000, base: 84400, rate: 0.26 },
+      { upTo: 2000000, base: 136400, rate: 0.28 },
+      { upTo: Infinity, base: 528400, rate: 0.30 },
+    ];
+
+    function estimateResidentTax(chargeableIncome) {
+      if (chargeableIncome <= 0) return 0;
+      let lowerBound = 0;
+      for (const bracket of RESIDENT_TAX_BRACKETS) {
+        if (chargeableIncome <= bracket.upTo) {
+          return bracket.base + ((chargeableIncome - lowerBound) * bracket.rate);
+        }
+        lowerBound = bracket.upTo;
+      }
+      return 0;
+    }
 
     async function readJson(resp) {
       const text = await resp.text();
@@ -86,12 +110,17 @@
       const [receipts, setReceipts] = useState([]);
       const [pendingId, setPendingId] = useState(1);
       const [view, setView] = useState('dashboard');
+      const [annualIncome, setAnnualIncome] = useState(Number(localStorage.getItem('receiptManagerAnnualIncome') || 0));
+      const [taxRebateAmount, setTaxRebateAmount] = useState(Number(localStorage.getItem('receiptManagerTaxRebateAmount') || 0));
       const [filters, setFilters] = useState({ query: '', category: '', from: '', to: '' });
       const [savingIds, setSavingIds] = useState([]);
       const [savingAll, setSavingAll] = useState(false);
       const [extractingIds, setExtractingIds] = useState([]);
       const [ocrEnabled, setOcrEnabledState] = useState(localStorage.getItem('receiptManagerOcrEnabled') !== 'false');
+      const [ocrConfig, setOcrConfig] = useState({ provider: 'gemini', label: 'Gemini Vision', enabled: true });
       const [summary, setSummary] = useState({ headline: 'No receipts yet', overview: 'Upload receipts to build a timeline.', timeline: [], cached: true, status: 'Ready' });
+      const [taxPlan, setTaxPlan] = useState({ total_claimed: 0, total_remaining: 0, categories: [] });
+      const [taxPlanStatus, setTaxPlanStatus] = useState('Ready');
       const [chatOpen, setChatOpen] = useState(false);
       const [chatBusy, setChatBusy] = useState(false);
       const [messages, setMessages] = useState([{ type: 'ai', text: 'Hi, I can help review your receipt claims, category limits, and next best action. I am not a licensed financial advisor.' }]);
@@ -129,10 +158,22 @@
       }, [toast]);
 
       useEffect(() => {
+        localStorage.setItem('receiptManagerAnnualIncome', String(annualIncome || 0));
+      }, [annualIncome]);
+
+      useEffect(() => {
+        localStorage.setItem('receiptManagerTaxRebateAmount', String(taxRebateAmount || 0));
+      }, [taxRebateAmount]);
+
+      useEffect(() => {
         if (!token || !accountName) return;
         setAuthenticated(token, accountName);
         loadReceipts(token).catch(() => clearAuthenticated());
       }, []);
+
+      useEffect(() => {
+        loadTaxPlan();
+      }, [receipts]);
 
       function setAuthenticated(nextToken, nextAccount) {
         setToken(nextToken);
@@ -167,7 +208,20 @@
           confirmed: true,
           needsReview: false,
         })));
+        loadOcrConfig(authToken);
         loadAiSummary(authToken);
+      }
+
+      async function loadOcrConfig(authToken = token) {
+        try {
+          const resp = await fetch('/ocr-config', { headers: authHeaders(authToken) });
+          const data = await readJson(resp);
+          if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+          setOcrConfig(data);
+          if (!data.enabled) setOcrEnabled(false);
+        } catch {
+          setOcrConfig({ provider: 'gemini', label: 'Gemini Vision', enabled: true });
+        }
       }
 
       async function loadAiSummary(authToken = token) {
@@ -185,6 +239,25 @@
           });
         } catch (err) {
           setSummary({ headline: 'Summary unavailable', overview: err.message, timeline: [], cached: true, status: 'Offline' });
+        }
+      }
+
+      async function loadTaxPlan() {
+        const receiptItems = confirmed.map(r => ({ categoryKey: r.categoryKey, amount: Number(r.amount || 0) }));
+        setTaxPlanStatus('Updating');
+        try {
+          const resp = await fetch('/tax-summary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ receipts: receiptItems }),
+          });
+          const data = await readJson(resp);
+          if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+          setTaxPlan(data);
+          setTaxPlanStatus('Ready');
+        } catch (err) {
+          setTaxPlan({ total_claimed: 0, total_remaining: 0, categories: [] });
+          setTaxPlanStatus(err.message);
         }
       }
 
@@ -335,9 +408,11 @@
             amount: Number(data.amount || receipt.amount || 0),
             categoryKey: data.categoryKey || receipt.categoryKey,
             needsReview: Boolean(data.needsReview || !data.amount || !data.categoryKey || (data.confidence || 0) < 0.7),
+            extractionMessage: data.message || '',
+            extractionProvider: data.provider || ocrConfig.provider,
           });
         } catch {
-          updateReceipt(receipt.id, { needsReview: true });
+          updateReceipt(receipt.id, { needsReview: true, extractionMessage: 'Receipt extraction failed. Fill in the fields manually.' });
         } finally {
           setExtractingIds(ids => ids.filter(id => id !== receipt.id));
         }
@@ -362,7 +437,7 @@
               };
               setReceipts(items => [...items, receipt]);
               setView('upload');
-              if (ocrEnabled) window.setTimeout(() => extractPendingReceipt(receipt), 0);
+              if (ocrEnabled && ocrConfig.enabled) window.setTimeout(() => extractPendingReceipt(receipt), 0);
               return current + 1;
             });
           };
@@ -383,6 +458,10 @@
       }
 
       function exportCsv() {
+        if (!visibleReceipts.length) {
+          setToast('Upload and save at least one receipt before exporting CSV.');
+          return;
+        }
         const rows = [['Title', 'Date', 'Category', 'Amount', 'Filename']];
         visibleReceipts.forEach(r => {
           const cat = categoryByKey(r.categoryKey);
@@ -479,6 +558,18 @@
                 setChatOpen={setChatOpen}
                 askAdvisor={askAdvisor}
                 openPreview={setPreview}
+                openPlanner={() => setView('planner')}
+                openUpload={() => setView('upload')}
+              />
+            ) : view === 'planner' ? (
+              <TaxPlanner
+                annualIncome={annualIncome}
+                setAnnualIncome={setAnnualIncome}
+                taxRebateAmount={taxRebateAmount}
+                setTaxRebateAmount={setTaxRebateAmount}
+                taxPlan={taxPlan}
+                taxPlanStatus={taxPlanStatus}
+                showDashboard={() => setView('dashboard')}
               />
             ) : (
               <UploadView
@@ -487,6 +578,7 @@
                 savingIds={savingIds}
                 savingAll={savingAll}
                 ocrEnabled={ocrEnabled}
+                ocrConfig={ocrConfig}
                 setOcrEnabled={setOcrEnabled}
                 confirmed={confirmed}
                 updateReceipt={updateReceipt}
@@ -494,6 +586,7 @@
                 confirmReceipt={confirmReceipt}
                 saveAllPending={saveAllPending}
                 handleFiles={handleFiles}
+                openPreview={setPreview}
                 showDashboard={() => setView('dashboard')}
               />
             )}
@@ -537,24 +630,26 @@
     }
 
     function Dashboard(props) {
-      const { claims, confirmed, visibleReceipts, filters, setFilters, duplicates, pendingReviewCount, summary, exportCsv, generatePdf, deleteReceipt, openUpload, setChatOpen, askAdvisor, openPreview } = props;
+      const { claims, confirmed, visibleReceipts, filters, setFilters, duplicates, pendingReviewCount, summary, exportCsv, generatePdf, deleteReceipt, openUpload, openPlanner, setChatOpen, askAdvisor, openPreview } = props;
       const reviewTotal = pendingReviewCount + duplicates.length;
       return (
         <section className="dashboard-section">
           <div className="dashboard-head">
             <div>
               <p className="eyebrow">Claims dashboard</p>
-              <h1>Tax relief command center</h1>
+              <h1>Tax claims command center</h1>
             </div>
             <div className="toolbar-actions">
-              <button className="btn btn-outline" onClick={exportCsv} type="button"><Icon name="download" /> Export CSV</button>
-              <button className="btn btn-outline" onClick={generatePdf} type="button"><Icon name="file-down" /> Generate PDF</button>
+              <button className="btn btn-outline" onClick={openPlanner} type="button"><Icon name="calculator" /> Tax planner</button>
+              <button className="btn btn-outline" onClick={openUpload} type="button"><Icon name="receipt" /> Add receipts</button>
+              <button className="btn btn-outline" disabled={!confirmed.length} onClick={exportCsv} type="button"><Icon name="download" /> Export CSV</button>
+              <button className="btn btn-outline" disabled={!confirmed.length} onClick={generatePdf} type="button"><Icon name="file-down" /> Generate PDF</button>
             </div>
           </div>
           <section className="metric-grid" aria-label="Claim overview">
             <Metric label="Total claimable" value={fmt(claims.total)} note="Based on confirmed receipts" primary />
             <Metric label="Receipts saved" value={confirmed.length} note={`${visibleReceipts.length} visible`} />
-            <Metric label="Categories used" value={claims.categories.length} note="Across relief buckets" />
+            <Metric label="Categories used" value={claims.categories.length} note="Across claimed categories" />
             <Metric label="Review items" value={reviewTotal} note="Missing fields or duplicates" />
           </section>
           <section className="dashboard-tools">
@@ -680,7 +775,7 @@
           </div>
           <p className="ai-overview">{summary.overview}</p>
           <div className="quick-prompts">
-            <button className="btn btn-outline btn-sm" type="button" onClick={() => prompt('What can I still claim?')}>Claim space</button>
+            <button className="btn btn-outline btn-sm" type="button" onClick={() => prompt('What claim space do I still have?')}>Claim space</button>
             <button className="btn btn-outline btn-sm" type="button" onClick={() => prompt('Which receipts need review?')}>Needs review</button>
             <button className="btn btn-outline btn-sm" type="button" onClick={() => prompt('Which category is near the limit?')}>Near limits</button>
           </div>
@@ -691,7 +786,71 @@
       );
     }
 
-    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, handleFiles, showDashboard }) {
+    function TaxPlanner({ annualIncome, setAnnualIncome, taxRebateAmount, setTaxRebateAmount, taxPlan, taxPlanStatus, showDashboard }) {
+      const chargeableIncome = Math.max(0, Number(annualIncome || 0) - Number(taxPlan.total_claimed || 0));
+      const estimatedTaxBeforeRebate = estimateResidentTax(chargeableIncome);
+      const finalTaxPayable = Math.max(0, estimatedTaxBeforeRebate - Number(taxRebateAmount || 0));
+      const claimedCategories = taxPlan.categories.filter(cat => Number(cat.claimable_amount || 0) > 0);
+
+      return (
+        <section className="dashboard-section">
+          <div className="dashboard-head">
+            <div>
+              <p className="eyebrow">Tax planner</p>
+              <h1>Income and rebate estimate</h1>
+            </div>
+            <div className="toolbar-actions">
+              <button className="btn btn-outline" onClick={showDashboard} type="button"><Icon name="arrow-left" /> Back to dashboard</button>
+            </div>
+          </div>
+          <section className="planner-grid">
+            <section className="panel planner-form-panel">
+              <div className="panel-title-row"><h2>Income and tax rebate</h2><span>{taxPlanStatus}</span></div>
+              <div className="planner-input-grid">
+                <div className="field">
+                  <label>Annual income</label>
+                  <input type="number" min="0" step="100" value={annualIncome || ''} onChange={e => setAnnualIncome(parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                </div>
+                <div className="field">
+                  <label>Tax rebate amount</label>
+                  <input type="number" min="0" step="50" value={taxRebateAmount || ''} onChange={e => setTaxRebateAmount(parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                </div>
+              </div>
+              <p className="helper-text">Tax rebate is deducted directly from the estimated tax payable after receipt claims are applied.</p>
+            </section>
+
+            <section className="panel planner-results-panel">
+              <div className="panel-title-row"><h2>Estimated result</h2><span>{fmt(finalTaxPayable)}</span></div>
+              <div className="planner-metrics">
+                <Metric label="Receipt claims" value={fmt(taxPlan.total_claimed)} note="From saved receipt categories" primary />
+                <Metric label="Chargeable income" value={fmt(chargeableIncome)} note="Income after claims" />
+                <Metric label="Tax before rebate" value={fmt(estimatedTaxBeforeRebate)} note="Resident-rate estimate" />
+                <Metric label="Final tax payable" value={fmt(finalTaxPayable)} note={`After ${fmt(taxRebateAmount || 0)} rebate`} />
+              </div>
+              <div className="claimed-category-list">
+                {claimedCategories.length ? claimedCategories.map(cat => {
+                  const source = categoryByKey(cat.category_key);
+                  const hasLimit = Number.isFinite(Number(cat.limit));
+                  const capLabel = hasLimit ? `${fmt(Math.max(0, Number(cat.remaining || 0)))} left` : 'No fixed limit';
+                  return (
+                    <article className="claimed-category-row" key={cat.category_key}>
+                      <span className="swatch" style={{ background: source?.color || '#156F67' }}></span>
+                      <div>
+                        <strong>{cat.category_label}</strong>
+                        <span>{capLabel}</span>
+                      </div>
+                      <strong>{fmt(cat.claimable_amount)}</strong>
+                    </article>
+                  );
+                }) : <p className="empty">Save receipts to show claimed categories here.</p>}
+              </div>
+            </section>
+          </section>
+        </section>
+      );
+    }
+
+    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, handleFiles, openPreview, showDashboard }) {
       const fileRef = useRef(null);
       const [dragging, setDragging] = useState(false);
       return (
@@ -702,11 +861,11 @@
           </div>
           <div className="upload-options">
             <label className="toggle-row">
-              <input type="checkbox" checked={ocrEnabled} onChange={e => setOcrEnabled(e.target.checked)} />
+              <input type="checkbox" checked={ocrEnabled && ocrConfig.enabled} disabled={!ocrConfig.enabled} onChange={e => setOcrEnabled(e.target.checked)} />
               <span className="toggle-switch"></span>
               <span>
                 <strong>AI receipt extraction</strong>
-                <small>{ocrEnabled ? 'Gemini reads uploaded receipts and pre-fills fields.' : 'Uploads stay manual. No OCR/AI call is made.'}</small>
+                <small>{ocrEnabled && ocrConfig.enabled ? `${ocrConfig.label} reads uploaded receipts and pre-fills fields.` : 'Uploads stay manual. No OCR/AI call is made.'}</small>
               </span>
             </label>
           </div>
@@ -724,7 +883,7 @@
           <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" multiple hidden onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
           <div className="pending-list">
             {pending.length ? pending.map(r => (
-              <PendingCard key={r.id} receipt={r} confirmed={confirmed} extracting={extractingIds.includes(r.id)} saving={savingIds.includes(r.id)} updateReceipt={updateReceipt} removePending={removePending} confirmReceipt={confirmReceipt} />
+              <PendingCard key={r.id} receipt={r} confirmed={confirmed} extracting={extractingIds.includes(r.id)} saving={savingIds.includes(r.id)} updateReceipt={updateReceipt} removePending={removePending} confirmReceipt={confirmReceipt} openPreview={openPreview} />
             )) : <p className="empty">All uploaded receipts are saved. Add more files or go back to the dashboard when you are done.</p>}
           </div>
           {pending.length ? <div className="pending-actions"><button className="btn btn-primary" disabled={savingAll} onClick={saveAllPending} type="button">{savingAll ? 'Saving all...' : 'Save all receipts'}</button></div> : null}
@@ -732,15 +891,16 @@
       );
     }
 
-    function PendingCard({ receipt, confirmed, extracting, saving, updateReceipt, removePending, confirmReceipt }) {
+    function PendingCard({ receipt, confirmed, extracting, saving, updateReceipt, removePending, confirmReceipt, openPreview }) {
       const duplicate = receipt.amount && receipt.categoryKey && receipt.receiptDate && confirmed.some(r => Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) && r.receiptDate === receipt.receiptDate && r.categoryKey === receipt.categoryKey);
       const amountInvalid = !receipt.amount || receipt.amount <= 0;
       const categoryInvalid = !receipt.categoryKey;
       return (
         <article className={`receipt-card ${receipt.needsReview || duplicate ? 'has-warning' : ''} ${amountInvalid || categoryInvalid ? 'has-error' : ''}`} data-pending-card={receipt.id}>
-          <img className="receipt-thumb" src={receipt.imageDataUrl} alt="" />
+          <img className="receipt-thumb" src={receipt.imageDataUrl} alt="" onClick={() => openPreview(receipt.imageDataUrl)} />
           <div className="receipt-fields">
             {extracting && <p className="receipt-note">Reading receipt...</p>}
+            {receipt.extractionMessage && <p className="receipt-note warning">{receipt.extractionMessage}</p>}
             {duplicate && <p className="receipt-note warning">Possible duplicate receipt.</p>}
             {receipt.needsReview && <p className="receipt-note warning">Review suggested before saving.</p>}
             <div className="field-grid">
@@ -750,6 +910,7 @@
               <div className="field"><label>Category</label><select className={categoryInvalid ? 'input-error' : ''} value={receipt.categoryKey || ''} onChange={e => updateReceipt(receipt.id, { categoryKey: e.target.value })}><option value="">Select category</option>{TAX_RELIEF_CATEGORIES.map(cat => <option key={cat.key} value={cat.key}>{cat.label} ({cat.limit === Infinity ? 'no limit' : fmt(cat.limit)})</option>)}</select></div>
             </div>
             <div className="action-row">
+              <button className="btn btn-outline btn-sm" onClick={() => openPreview(receipt.imageDataUrl)} type="button">View receipt</button>
               <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => confirmReceipt(receipt.id)} type="button">{saving ? 'Saving...' : 'Save receipt'}</button>
               <button className="btn btn-danger btn-sm" onClick={() => removePending(receipt.id)} type="button">Remove</button>
             </div>
