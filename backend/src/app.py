@@ -1,10 +1,15 @@
 import img2pdf
 import io
+import json
+import os
 import re
 import secrets
 import sqlite3
+import urllib.error
+import urllib.request
 from hashlib import sha256
 from pathlib import Path
+from datetime import date
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File
@@ -19,6 +24,8 @@ AUTH_TOKENS: dict[str, str] = {}
 ADMIN_TOKENS: set[str] = set()
 ADMIN_ACCOUNT_NAME = "admin"
 ADMIN_PASSWORD = "admin"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 
 
 def hash_password(password: str) -> str:
@@ -39,9 +46,30 @@ def init_user_db(account_name: str) -> None:
                 receipt_number TEXT NOT NULL,
                 amount REAL NOT NULL,
                 category_key TEXT NOT NULL,
+                title TEXT,
+                receipt_date TEXT,
                 filename TEXT,
                 image_data_url TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(receipts)").fetchall()
+        }
+        if "title" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN title TEXT")
+        if "receipt_date" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN receipt_date TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_summaries (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                summary_json TEXT NOT NULL,
+                receipt_count INTEGER NOT NULL,
+                receipt_signature TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -171,8 +199,18 @@ class ReceiptCreate(BaseModel):
     receiptNumber: str
     amount: float
     categoryKey: str
+    title: Optional[str] = None
+    receiptDate: Optional[str] = None
     filename: Optional[str] = None
     imageDataUrl: Optional[str] = None
+
+
+class ReceiptBatchCreate(BaseModel):
+    receipts: list[ReceiptCreate]
+
+
+class AiChatRequest(BaseModel):
+    message: str
 
 
 TAX_RELIEF_CATEGORIES = {
@@ -188,6 +226,151 @@ TAX_RELIEF_CATEGORIES = {
     "renewable_energy": {"label": "Renewable Energy Equipment", "limit": 800},
     "residential": {"label": "Residential Accommodation", "limit": 2500},
 }
+
+
+def normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def receipt_signature(receipts: list[sqlite3.Row]) -> str:
+    payload = [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "receipt_date": row["receipt_date"],
+            "amount": row["amount"],
+            "category_key": row["category_key"],
+            "created_at": row["created_at"],
+        }
+        for row in receipts
+    ]
+    return sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def fallback_ai_summary(receipts: list[sqlite3.Row]) -> dict:
+    if not receipts:
+        return {
+            "headline": "No receipts uploaded yet.",
+            "overview": "Upload receipts to build a claim timeline and spending summary.",
+            "timeline": [],
+        }
+
+    timeline = [
+        {
+            "date": row["receipt_date"] or row["created_at"][:10],
+            "title": row["title"] or f"Receipt {row['id']}",
+            "summary": f"{TAX_RELIEF_CATEGORIES[row['category_key']]['label']} claim for RM {row['amount']:.2f}.",
+        }
+        for row in receipts
+    ]
+    total = sum(row["amount"] for row in receipts)
+    return {
+        "headline": f"{len(receipts)} receipts summarized",
+        "overview": f"Your saved receipts total RM {total:.2f}. Review limits before deciding what to claim.",
+        "timeline": timeline,
+    }
+
+
+def generate_gemini_summary(receipts: list[sqlite3.Row]) -> dict:
+    fallback = fallback_ai_summary(receipts)
+    if not GEMINI_API_KEY or not receipts:
+        return fallback
+
+    compact_receipts = [
+        {
+            "title": row["title"] or f"Receipt {row['id']}",
+            "date": row["receipt_date"] or row["created_at"][:10],
+            "amount": row["amount"],
+            "category": TAX_RELIEF_CATEGORIES[row["category_key"]]["label"],
+        }
+        for row in receipts
+    ]
+    prompt = (
+        "Act as a concise personal finance advisor for tax receipt planning. "
+        "Summarize these receipt records as compact JSON only. "
+        "Return keys: headline, overview, timeline. timeline must be an array "
+        "of objects with date, title, summary. Keep every timeline summary under 18 words. "
+        "Give practical claim organization guidance, not investment or legal advice.\n"
+        f"{json.dumps(compact_receipts, ensure_ascii=True)}"
+    )
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "response_mime_type": "application/json",
+        },
+    }).encode("utf-8")
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    )
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        parsed = json.loads(text)
+        if not isinstance(parsed.get("timeline"), list):
+            return fallback
+        return {
+            "headline": str(parsed.get("headline") or fallback["headline"]),
+            "overview": str(parsed.get("overview") or fallback["overview"]),
+            "timeline": parsed["timeline"],
+        }
+    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
+        return fallback
+
+
+def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
+    if not GEMINI_API_KEY:
+        return "Gemini API key is not set. Add GEMINI_API_KEY to .env and restart the app."
+
+    compact_receipts = [
+        {
+            "title": row["title"] or f"Receipt {row['id']}",
+            "date": row["receipt_date"] or row["created_at"][:10],
+            "amount": row["amount"],
+            "category": TAX_RELIEF_CATEGORIES[row["category_key"]]["label"],
+        }
+        for row in receipts
+    ]
+    prompt = (
+        "You are a concise personal finance assistant for tax receipt planning. "
+        "Use only the user's receipt records below. Do not provide legal, investment, or tax filing advice. "
+        "Keep the answer under 70 words and give practical next steps.\n"
+        f"Receipts: {json.dumps(compact_receipts, ensure_ascii=True)}\n"
+        f"User question: {message}"
+    )
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
+        return "I could not reach Gemini right now. Try again in a moment."
+
+
+def clear_ai_summary_cache(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM ai_summaries WHERE id = 1")
 
 def create_backend() -> FastAPI:
     app = FastAPI(title="Backend server")
@@ -319,7 +502,7 @@ def create_backend() -> FastAPI:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
-                SELECT id, receipt_number, amount, category_key, filename, image_data_url, created_at
+                SELECT id, receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, created_at
                 FROM receipts
                 ORDER BY id
                 """
@@ -332,6 +515,8 @@ def create_backend() -> FastAPI:
                     "receipt_number": row["receipt_number"],
                     "amount": row["amount"],
                     "category_key": row["category_key"],
+                    "title": row["title"],
+                    "receipt_date": row["receipt_date"],
                     "filename": row["filename"],
                     "image_data_url": row["image_data_url"],
                     "created_at": row["created_at"],
@@ -353,22 +538,80 @@ def create_backend() -> FastAPI:
 
         init_user_db(account_name)
         with sqlite3.connect(user_db_path(account_name)) as conn:
+            category_count = conn.execute(
+                "SELECT COUNT(*) FROM receipts WHERE category_key = ?",
+                (payload.categoryKey,),
+            ).fetchone()[0]
+            category_label = TAX_RELIEF_CATEGORIES[payload.categoryKey]["label"]
+            title = normalize_optional_text(payload.title) or f"Receipt {category_label} {category_count + 1}"
+            receipt_date = normalize_optional_text(payload.receiptDate) or date.today().isoformat()
             cursor = conn.execute(
                 """
-                INSERT INTO receipts (receipt_number, amount, category_key, filename, image_data_url)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload.receiptNumber,
                     payload.amount,
                     payload.categoryKey,
+                    title,
+                    receipt_date,
                     payload.filename,
                     payload.imageDataUrl,
                 ),
             )
+            clear_ai_summary_cache(conn)
             receipt_id = cursor.lastrowid
 
-        return {"id": receipt_id}
+        return {"id": receipt_id, "title": title, "receipt_date": receipt_date}
+
+    @app.post("/receipts/batch")
+    async def add_receipts_batch(
+        payload: ReceiptBatchCreate,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        account_name = require_user(authorization)
+        if not payload.receipts:
+            raise HTTPException(status_code=400, detail="No receipts to save")
+        for receipt in payload.receipts:
+            if receipt.amount <= 0:
+                raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+            if receipt.categoryKey not in TAX_RELIEF_CATEGORIES:
+                raise HTTPException(status_code=400, detail="Unknown category")
+
+        init_user_db(account_name)
+        saved = []
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            counts = {
+                row[0]: row[1]
+                for row in conn.execute(
+                    "SELECT category_key, COUNT(*) FROM receipts GROUP BY category_key"
+                ).fetchall()
+            }
+            for receipt in payload.receipts:
+                counts[receipt.categoryKey] = counts.get(receipt.categoryKey, 0) + 1
+                category_label = TAX_RELIEF_CATEGORIES[receipt.categoryKey]["label"]
+                title = normalize_optional_text(receipt.title) or f"Receipt {category_label} {counts[receipt.categoryKey]}"
+                receipt_date = normalize_optional_text(receipt.receiptDate) or date.today().isoformat()
+                cursor = conn.execute(
+                    """
+                    INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt.receiptNumber,
+                        receipt.amount,
+                        receipt.categoryKey,
+                        title,
+                        receipt_date,
+                        receipt.filename,
+                        receipt.imageDataUrl,
+                    ),
+                )
+                saved.append({"id": cursor.lastrowid, "title": title, "receipt_date": receipt_date})
+            clear_ai_summary_cache(conn)
+
+        return {"receipts": saved}
 
     @app.delete("/receipts/{receipt_id}")
     async def delete_receipt(
@@ -383,6 +626,8 @@ def create_backend() -> FastAPI:
                 "DELETE FROM receipts WHERE id = ?",
                 (receipt_id,),
             )
+            if cursor.rowcount:
+                clear_ai_summary_cache(conn)
 
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Receipt not found")
@@ -411,6 +656,72 @@ def create_backend() -> FastAPI:
 
         summary_request = TaxSummaryRequest.model_validate(payload)
         return calculate_summary(summary_request.receipts)
+
+    @app.get("/ai-summary")
+    async def ai_summary(authorization: Optional[str] = Header(default=None)):
+        account_name = require_user(authorization)
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT id, title, receipt_date, amount, category_key, created_at
+                FROM receipts
+                ORDER BY COALESCE(receipt_date, DATE(created_at)), id
+                """
+            ).fetchall()
+            signature = receipt_signature(rows)
+            cached = conn.execute(
+                """
+                SELECT summary_json, receipt_count, receipt_signature, updated_at
+                FROM ai_summaries
+                WHERE id = 1
+                """
+            ).fetchone()
+            if cached and cached["receipt_count"] == len(rows) and cached["receipt_signature"] == signature:
+                summary = json.loads(cached["summary_json"])
+                summary["cached"] = True
+                summary["updated_at"] = cached["updated_at"]
+                return summary
+
+            summary = generate_gemini_summary(rows)
+            conn.execute(
+                """
+                INSERT INTO ai_summaries (id, summary_json, receipt_count, receipt_signature, updated_at)
+                VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    summary_json = excluded.summary_json,
+                    receipt_count = excluded.receipt_count,
+                    receipt_signature = excluded.receipt_signature,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (json.dumps(summary), len(rows), signature),
+            )
+            summary["cached"] = False
+            return summary
+
+    @app.post("/ai-chat")
+    async def ai_chat(
+        payload: AiChatRequest,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        account_name = require_user(authorization)
+        message = payload.message.strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="Message required")
+
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT id, title, receipt_date, amount, category_key, created_at
+                FROM receipts
+                ORDER BY COALESCE(receipt_date, DATE(created_at)), id
+                """
+            ).fetchall()
+
+        return {"reply": generate_gemini_chat(message, rows)}
 
     return app
 

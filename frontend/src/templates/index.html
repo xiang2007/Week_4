@@ -3,749 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Receipt Manager — Upload &amp; Categorize</title>
+  <title>Receipt Manager Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <style>
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    :root {
-      --paper: #F5F2E8;
-      --paper-dim: #EDE8D9;
-      --line: #D9D2BC;
-      --ink: #1A1A1F;
-      --ink-soft: #5C5748;
-      --ink-faint: #8A8571;
-      --stamp: #C4432B;
-      --stamp-dark: #9E3220;
-      --mint: #2F7A5C;
-      --mint-dark: #24614A;
-      --amber: #B8863B;
-      --card: #FFFFFF;
-      --font-display: 'Space Grotesk', sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
-      --font-body: 'Inter', sans-serif;
-      --shadow-sm: 0 2px 8px rgba(26, 26, 31, 0.06);
-      --shadow-md: 0 10px 26px -10px rgba(26, 26, 31, 0.22);
-      --shadow-lg: 0 24px 48px -18px rgba(26, 26, 31, 0.24);
-    }
-
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: var(--font-body);
-      background: var(--paper);
-      color: var(--ink);
-      line-height: 1.6;
-      background-image: radial-gradient(circle at 1px 1px, rgba(26,26,31,0.05) 1px, transparent 0);
-      background-size: 22px 22px;
-      min-height: 100vh;
-      padding-bottom: 3rem;
-    }
-
-    a { color: inherit; }
-
-    :focus-visible {
-      outline: 2.5px solid var(--stamp);
-      outline-offset: 3px;
-    }
-
-    /* ── Navbar ── */
-    .navbar {
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1.1rem 1.5rem;
-      background: rgba(245,242,232,0.9);
-      backdrop-filter: blur(8px);
-      border-bottom: 1.5px dashed var(--line);
-      margin-bottom: 2.5rem;
-    }
-    .navbar-brand {
-      display: flex;
-      align-items: center;
-      gap: 0.55rem;
-      font-family: var(--font-display);
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--ink);
-      text-decoration: none;
-      letter-spacing: -0.01em;
-    }
-    .navbar-brand .mark {
-      width: 28px; height: 28px;
-      display: flex; align-items: center; justify-content: center;
-      background: var(--ink);
-      color: var(--paper);
-      border-radius: 4px;
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      font-weight: 700;
-      transform: rotate(-4deg);
-      flex-shrink: 0;
-    }
-    .navbar-links { display: flex; gap: 1rem; align-items: center; }
-    .navbar-links a.navlink {
-      text-decoration: none;
-      color: var(--ink-soft);
-      font-family: var(--font-mono);
-      font-size: 0.82rem;
-      font-weight: 600;
-      transition: color 0.2s;
-    }
-    .navbar-links a.navlink:hover { color: var(--ink); }
-
-    .user-chip {
-      display: none;
-      align-items: center;
-      gap: 0.6rem;
-      font-family: var(--font-mono);
-      font-size: 0.78rem;
-      color: var(--ink-soft);
-    }
-
-    .auth-panel {
-      max-width: 520px;
-      margin: 0 auto 2rem;
-      background: var(--card);
-      border: 1.5px solid var(--line);
-      border-radius: 1rem;
-      box-shadow: var(--shadow-lg);
-      padding: 2rem;
-    }
-
-    .auth-tabs {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.45rem;
-      padding: 0.35rem;
-      background: var(--paper-dim);
-      border: 1.5px solid var(--line);
-      border-radius: 0.75rem;
-      margin-bottom: 1.35rem;
-    }
-
-    .auth-tab {
-      border: 0;
-      background: transparent;
-      color: var(--ink-soft);
-      border-radius: 0.55rem;
-      padding: 0.7rem;
-      font-family: var(--font-mono);
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    .auth-tab.active {
-      background: var(--ink);
-      color: var(--paper);
-    }
-
-    .auth-form {
-      display: grid;
-      gap: 0.9rem;
-    }
-
-    .auth-field {
-      display: grid;
-      gap: 0.35rem;
-    }
-
-    .auth-field label {
-      font-family: var(--font-mono);
-      font-size: 0.76rem;
-      font-weight: 700;
-      color: var(--ink-soft);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-
-    .auth-input {
-      padding: 0.78rem 0.9rem;
-      border: 1.5px solid var(--line);
-      border-radius: 0.6rem;
-      font-size: 0.95rem;
-      font-family: var(--font-body);
-      background: #fff;
-      color: var(--ink);
-    }
-
-    .auth-input:focus {
-      outline: none;
-      border-color: var(--stamp);
-      box-shadow: 0 0 0 3px rgba(196, 67, 43, 0.12);
-    }
-
-    .auth-error {
-      display: none;
-      background: #FBEAE6;
-      color: var(--stamp-dark);
-      border: 1.5px solid #F0C4B8;
-      border-radius: 0.6rem;
-      padding: 0.75rem 0.85rem;
-      font-size: 0.86rem;
-    }
-
-    .app-shell {
-      display: none;
-    }
-
-    body.authenticated .auth-panel {
-      display: none;
-    }
-
-    body.authenticated .app-shell {
-      display: block;
-    }
-
-    body.authenticated .user-chip {
-      display: inline-flex;
-    }
-
-    .container {
-      width: 100%;
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
-
-    .page-eyebrow {
-      font-family: var(--font-mono);
-      text-align: center;
-      font-size: 0.76rem;
-      font-weight: 600;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--stamp-dark);
-      margin-bottom: 1.25rem;
-    }
-
-    /* ── Stepper Nav ── */
-    .stepper {
-      display: flex;
-      gap: 0.4rem;
-      margin-bottom: 2rem;
-      padding: 0.4rem;
-      background: var(--card);
-      border: 1.5px solid var(--line);
-      border-radius: 0.9rem;
-      box-shadow: var(--shadow-sm);
-    }
-
-    .step {
-      flex: 1;
-      text-align: center;
-      padding: 0.85rem 0.75rem;
-      border-radius: 0.65rem;
-      color: var(--ink-faint);
-      font-family: var(--font-mono);
-      font-weight: 600;
-      font-size: 0.82rem;
-      letter-spacing: 0.01em;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      user-select: none;
-      position: relative;
-    }
-
-    .step:hover {
-      background: var(--paper-dim);
-      color: var(--ink);
-    }
-
-    .step.active {
-      background: var(--ink);
-      color: var(--paper);
-    }
-
-    .step.completed {
-      color: var(--mint-dark);
-      background: #EAF4EE;
-    }
-
-    .step.completed::before {
-      content: "✓ ";
-      font-weight: 700;
-    }
-
-    @media (max-width: 680px) {
-      .step { font-size: 0.7rem; padding: 0.7rem 0.4rem; }
-    }
-
-    /* ── Sections ── */
-    .section {
-      display: none;
-      background: var(--card);
-      border: 1.5px solid var(--line);
-      border-radius: 1rem;
-      box-shadow: var(--shadow-lg);
-      padding: 2.25rem;
-      position: relative;
-    }
-
-    .section.active {
-      display: block;
-      animation: fadeIn 0.28s ease;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .section-title {
-      font-family: var(--font-display);
-      font-size: 1.7rem;
-      font-weight: 700;
-      margin-bottom: 0.4rem;
-      color: var(--ink);
-      letter-spacing: -0.02em;
-    }
-
-    .section-subtitle {
-      color: var(--ink-soft);
-      font-size: 0.96rem;
-      margin-bottom: 1.75rem;
-      line-height: 1.6;
-      max-width: 640px;
-    }
-
-    /* ── Dropzone ── */
-    .dropzone {
-      border: 1.5px dashed var(--line);
-      border-radius: 0.85rem;
-      padding: 3rem 1.25rem;
-      cursor: pointer;
-      text-align: center;
-      color: var(--ink-soft);
-      transition: all 0.2s ease;
-      margin-bottom: 1.75rem;
-      background: var(--paper-dim);
-    }
-
-    .dropzone:hover,
-    .dropzone.dragover {
-      border-color: var(--stamp);
-      background: #FBF3EE;
-    }
-
-    .dropzone svg {
-      margin-bottom: 0.8rem;
-      color: var(--ink-faint);
-    }
-
-    .dropzone span {
-      color: var(--stamp-dark);
-      font-weight: 700;
-      text-decoration: none;
-    }
-
-    .dropzone small {
-      display: block;
-      margin-top: 0.4rem;
-      color: var(--ink-faint);
-      font-family: var(--font-mono);
-      font-size: 0.76rem;
-    }
-
-    /* ── Receipt Cards ── */
-    .receipt-card {
-      background: var(--card);
-      border: 1.5px solid var(--line);
-      border-radius: 0.85rem;
-      padding: 1rem;
-      margin-bottom: 1rem;
-      display: grid;
-      grid-template-columns: 76px 1fr;
-      gap: 1rem;
-      align-items: start;
-      transition: all 0.2s ease;
-    }
-
-    .receipt-card:hover {
-      border-color: var(--stamp);
-      box-shadow: var(--shadow-sm);
-    }
-
-    .receipt-card.confirmed {
-      border-color: var(--mint);
-      background: #F4FAF6;
-    }
-
-    .receipt-thumb {
-      width: 76px;
-      height: 76px;
-      object-fit: cover;
-      border-radius: 0.6rem;
-      border: 1.5px solid var(--line);
-      background: #fff;
-    }
-
-    .receipt-info {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .receipt-label {
-      font-family: var(--font-mono);
-      font-weight: 700;
-      font-size: 0.82rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 0.28rem 0.65rem;
-      border-radius: 9999px;
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-    }
-
-    .badge-success { background: #EAF4EE; color: var(--mint-dark); }
-    .badge-pending { background: var(--paper-dim); color: var(--ink-soft); }
-
-    .input-row {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
-    }
-
-    .amount-input,
-    .category-select {
-      padding: 0.7rem 0.85rem;
-      border: 1.5px solid var(--line);
-      border-radius: 0.6rem;
-      font-size: 0.92rem;
-      font-family: var(--font-body);
-      background: #fff;
-      color: var(--ink);
-      transition: all 0.2s ease;
-    }
-
-    .amount-input { flex: 1; }
-    .category-select { flex: 1.7; }
-
-    .amount-input:focus,
-    .category-select:focus {
-      outline: none;
-      border-color: var(--stamp);
-      box-shadow: 0 0 0 3px rgba(196, 67, 43, 0.12);
-    }
-
-    .rm-prefix {
-      font-family: var(--font-mono);
-      font-weight: 700;
-      color: var(--ink-faint);
-      font-size: 0.9rem;
-    }
-
-    /* ── Buttons ── */
-    .btn {
-      padding: 0.78rem 1.4rem;
-      border: none;
-      border-radius: 0.6rem;
-      font-size: 0.92rem;
-      cursor: pointer;
-      transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
-      font-weight: 600;
-      font-family: var(--font-body);
-    }
-
-    .btn-primary {
-      background: var(--ink);
-      color: var(--paper);
-      box-shadow: 3px 3px 0 var(--stamp);
-    }
-
-    .btn-primary:hover {
-      transform: translate(-2px, -2px);
-      box-shadow: 5px 5px 0 var(--stamp);
-    }
-
-    .btn-primary:disabled,
-    .btn:disabled {
-      background: var(--line);
-      color: #fff;
-      cursor: not-allowed;
-      box-shadow: none;
-      transform: none;
-      opacity: 0.7;
-    }
-
-    .btn-sm {
-      padding: 0.55rem 0.9rem;
-      font-size: 0.82rem;
-      border-radius: 0.5rem;
-    }
-
-    .btn-danger {
-      background: #FBEAE6;
-      color: var(--stamp-dark);
-    }
-
-    .btn-danger:hover { background: #F5D8D1; }
-
-    .btn-outline {
-      background: transparent;
-      border: 1.5px solid var(--ink);
-      color: var(--ink);
-    }
-
-    .btn-outline:hover { background: var(--ink); color: var(--paper); }
-
-    .action-row {
-      display: flex;
-      gap: 0.6rem;
-      margin-top: 0.2rem;
-    }
-
-    /* ── Confirmed List ── */
-    .confirmed-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.65rem;
-      margin-top: 1.25rem;
-      padding-top: 1.25rem;
-      border-top: 1.5px dashed var(--line);
-    }
-
-    .confirmed-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.55rem;
-      background: var(--card);
-      border: 1.5px solid var(--mint);
-      border-radius: 9999px;
-      padding: 0.45rem 0.85rem 0.45rem 0.45rem;
-      font-size: 0.82rem;
-      font-family: var(--font-mono);
-    }
-
-    .confirmed-pill img {
-      width: 30px;
-      height: 30px;
-      object-fit: cover;
-      border-radius: 50%;
-      border: 1.5px solid #dcfce7;
-    }
-
-    .confirmed-pill .pill-cat { color: var(--ink-soft); }
-    .confirmed-pill .pill-amt { font-weight: 700; color: var(--mint-dark); }
-
-    .pill-delete {
-      width: 28px;
-      height: 28px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border: 0;
-      border-radius: 50%;
-      background: #FBEAE6;
-      color: var(--stamp-dark);
-      cursor: pointer;
-      font-size: 1rem;
-      line-height: 1;
-      font-weight: 700;
-    }
-
-    .pill-delete:hover { background: #F5D8D1; }
-
-    /* ── Nav Buttons ── */
-    .nav-buttons {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-top: 1.75rem;
-      padding-top: 1.25rem;
-      border-top: 1.5px dashed var(--line);
-    }
-
-    /* ── Section 2: Summary ── */
-    .summary-header {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      margin-bottom: 1.75rem;
-    }
-
-    .summary-stat {
-      text-align: left;
-      background: var(--paper-dim);
-      border: 1.5px solid var(--line);
-      border-radius: 0.85rem;
-      padding: 1.4rem;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .summary-stat .label {
-      font-family: var(--font-mono);
-      font-size: 0.76rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--ink-faint);
-      margin-bottom: 0.6rem;
-      font-weight: 600;
-    }
-
-    .summary-stat .value {
-      font-family: var(--font-display);
-      font-size: 1.9rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-    }
-
-    .summary-stat .value.primary { color: var(--stamp-dark); }
-    .summary-stat .value.success { color: var(--mint-dark); }
-
-    .category-bar {
-      background: var(--card);
-      border-radius: 0.75rem;
-      padding: 1rem 1rem 0.9rem;
-      border: 1.5px solid var(--line);
-      margin-bottom: 0.75rem;
-    }
-
-    .bar-label {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.9rem;
-      margin-bottom: 0.55rem;
-      gap: 1rem;
-    }
-
-    .bar-label .cat-name {
-      font-weight: 700;
-      color: var(--ink);
-    }
-
-    .bar-label .cat-amt {
-      font-family: var(--font-mono);
-      color: var(--ink-soft);
-      font-weight: 600;
-    }
-
-    .bar-track {
-      height: 10px;
-      background: var(--paper-dim);
-      border-radius: 9999px;
-      overflow: hidden;
-      border: 1px solid var(--line);
-    }
-
-    .bar-fill {
-      height: 100%;
-      border-radius: 9999px;
-      transition: width 0.4s ease;
-    }
-
-    .bar-fill.green { background: var(--mint); }
-    .bar-fill.amber { background: var(--amber); }
-    .bar-fill.red { background: var(--stamp); }
-
-    .bar-footer {
-      display: flex;
-      justify-content: space-between;
-      font-family: var(--font-mono);
-      font-size: 0.76rem;
-      color: var(--ink-faint);
-      margin-top: 0.5rem;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-
-    /* ── Section 3: PDF ── */
-    .pdf-section {
-      text-align: center;
-      padding: 2.75rem 1rem 2.25rem;
-      background: var(--paper-dim);
-      border: 1.5px dashed var(--line);
-      border-radius: 0.85rem;
-    }
-
-    .pdf-section::before {
-      content: "📄";
-      display: block;
-      font-size: 2.75rem;
-      margin-bottom: 0.8rem;
-    }
-
-    .pdf-section p {
-      color: var(--ink-soft);
-      margin-bottom: 1.5rem;
-      font-size: 0.96rem;
-      line-height: 1.7;
-    }
-
-    .spinner {
-      display: inline-block;
-      width: 18px;
-      height: 18px;
-      border: 2px solid var(--line);
-      border-top-color: var(--stamp);
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
-      vertical-align: middle;
-      margin-right: 0.5rem;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .error-msg {
-      background: #FBEAE6;
-      color: var(--stamp-dark);
-      border-radius: 0.6rem;
-      padding: 0.85rem 1rem;
-      margin-top: 1rem;
-      font-size: 0.88rem;
-      border: 1.5px solid #F0C4B8;
-    }
-
-    #pdf-success {
-      background: #EAF4EE;
-      border: 1.5px solid #BFE3CD;
-      display: inline-block;
-      padding: 0.8rem 1.1rem;
-      border-radius: 0.6rem;
-      font-family: var(--font-mono);
-    }
-
-    /* ── Responsive ── */
-    @media (max-width: 768px) {
-      .section { padding: 1.5rem; }
-      .section-title { font-size: 1.4rem; }
-      .summary-header { grid-template-columns: 1fr; }
-    }
-
-    @media (max-width: 520px) {
-      .navbar-links a.navlink.hide-mobile { display: none; }
-      .receipt-card { grid-template-columns: 1fr; }
-      .receipt-thumb { width: 100%; height: 150px; }
-      .input-row { flex-direction: column; align-items: stretch; }
-      .action-row { flex-wrap: wrap; }
-      .nav-buttons { flex-direction: column; gap: 0.8rem; align-items: stretch; }
-      .nav-buttons .btn { width: 100%; }
-      .bar-label, .bar-footer { flex-direction: column; align-items: flex-start; }
-    }
-  </style>
+  <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-
   <nav class="navbar">
     <a href="/" class="navbar-brand">
       <span class="mark">RM</span>
@@ -760,134 +24,141 @@
   </nav>
 
   <section class="auth-panel" id="auth-panel">
-    <h2 class="section-title">Login to Receipt Manager</h2>
-    <p class="section-subtitle">Create an account or log in to continue with your saved receipts.</p>
+    <h1>Receipt Manager</h1>
+    <p>Log in to view your saved claims dashboard.</p>
     <div class="auth-tabs" role="tablist">
       <button class="auth-tab active" id="login-tab" type="button">Login</button>
       <button class="auth-tab" id="signup-tab" type="button">Sign up</button>
     </div>
     <form class="auth-form" id="auth-form">
-      <div class="auth-field">
+      <div class="field">
         <label for="account-name">Account name</label>
-        <input class="auth-input" id="account-name" name="accountName" autocomplete="username" required minlength="3" maxlength="40">
+        <input id="account-name" name="accountName" autocomplete="username" required minlength="3" maxlength="40">
       </div>
-      <div class="auth-field">
+      <div class="field">
         <label for="account-password">Password</label>
-        <input class="auth-input" id="account-password" name="password" type="password" autocomplete="current-password" required minlength="6">
+        <input id="account-password" name="password" type="password" autocomplete="current-password" required minlength="6">
       </div>
-      <div class="auth-error" id="auth-error"></div>
+      <div class="error-msg" id="auth-error"></div>
       <button class="btn btn-primary" id="auth-submit" type="submit">Login</button>
     </form>
   </section>
 
-  <div class="container app-shell" id="app-shell">
-    <div class="page-eyebrow">🧾 Upload &amp; Categorize</div>
-    <!-- Stepper Navigation -->
-    <div class="stepper" id="stepper">
-      <div class="step active" data-step="1">1 · Upload &amp; Categorize</div>
-      <div class="step" data-step="2">2 · Tax Relief Summary</div>
-      <div class="step" data-step="3">3 · Convert to PDF</div>
-    </div>
-    <!-- ═══════ SECTION 1: Upload & Categorize ═══════ -->
-    <div class="section active" id="section-1">
-      <h2 class="section-title">Upload &amp; Categorize Receipts</h2>
-      <p class="section-subtitle">Upload receipt images, enter the claimed amount, and assign each item to the correct tax relief category.</p>
+  <main class="app-shell" id="app-shell">
+    <section class="dashboard-section" id="dashboard-section">
+      <div class="dashboard-head">
+        <div>
+          <p class="eyebrow">Claims dashboard</p>
+          <h1>Tax receipts</h1>
+        </div>
+        <button class="btn btn-outline" id="btn-generate-pdf" type="button">Generate PDF</button>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="panel claim-panel">
+          <div class="donut-wrap">
+            <div class="donut" id="claim-donut" aria-label="Claim distribution chart">
+              <div class="donut-hole">
+                <span>Total claimed</span>
+                <strong id="total-claimed">RM 0.00</strong>
+              </div>
+            </div>
+            <div class="legend" id="category-legend"></div>
+          </div>
+        </section>
+
+        <aside class="panel history-panel">
+          <div class="panel-title-row">
+            <h2>Receipt History</h2>
+            <span id="receipt-count">0</span>
+          </div>
+          <div class="history-list" id="history-list"></div>
+        </aside>
+      </div>
+
+      <section class="panel ai-panel">
+        <div class="panel-title-row">
+          <div>
+            <p class="eyebrow">Summary</p>
+            <h2 id="ai-headline">No receipts yet</h2>
+          </div>
+          <span class="cache-chip" id="cache-chip">Ready</span>
+        </div>
+        <p class="ai-overview" id="ai-overview">Upload receipts to build a timeline.</p>
+        <div class="timeline" id="ai-timeline"></div>
+      </section>
+
+      <div class="pdf-status" id="pdf-status"></div>
+    </section>
+
+    <section class="upload-section" id="upload-section">
+      <div class="upload-head">
+        <div>
+          <p class="eyebrow">Upload section</p>
+          <h2>Add receipts</h2>
+        </div>
+        <button class="btn btn-outline" id="btn-back-dashboard" type="button">Back to dashboard</button>
+      </div>
 
       <div class="dropzone" id="dropzone">
-        <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/>
-        </svg>
-        <br>
-        <span>Click to browse</span> or drag &amp; drop receipt images
-        <br><small>PNG, JPG — add one receipt at a time</small>
+        <strong>Add receipt images</strong>
+        <span>PNG or JPG files</span>
       </div>
       <input type="file" id="fileInput" accept=".png,.jpg,.jpeg,image/png,image/jpeg" multiple hidden>
+      <div id="pending-list" class="pending-list"></div>
+      <div id="pending-actions" class="pending-actions"></div>
+    </section>
 
-      <div id="pending-list"></div>
+    <button class="fab" id="btn-open-upload" type="button" aria-label="Open upload section">+</button>
+  </main>
 
-      <div id="confirmed-list" class="confirmed-list"></div>
-
-      <div class="nav-buttons">
-        <div></div>
-        <button class="btn btn-primary" id="btn-next-1" disabled>Next: See Summary &#10142;</button>
+  <section class="advisor-chat" id="advisor-chat" aria-label="Personal finance advisor chat">
+    <button class="advisor-bubble" id="advisor-bubble" type="button" aria-label="Open AI advisor">AI</button>
+    <div class="advisor-box" id="advisor-box">
+      <div class="advisor-head">
+        <div>
+          <p class="eyebrow">AI advisor</p>
+          <h2>Personal finance helper</h2>
+        </div>
+        <button class="icon-btn" id="advisor-close" type="button" aria-label="Close AI advisor">×</button>
       </div>
+      <div class="advisor-messages" id="advisor-messages" aria-live="polite">
+        <p class="advisor-msg ai">Hi, I can help review your receipt claims, category limits, and next best action. I am not a licensed financial advisor.</p>
+      </div>
+      <form class="advisor-form" id="advisor-form">
+        <input id="advisor-input" name="message" autocomplete="off" placeholder="Ask about your claims...">
+        <button class="btn btn-primary btn-sm" type="submit">Send</button>
+      </form>
     </div>
+  </section>
 
-    <!-- ═══════ SECTION 2: Tax Relief Summary ═══════ -->
-    <div class="section" id="section-2">
-      <h2 class="section-title">Tax Relief Summary</h2>
-      <p class="section-subtitle">Review your total claimed amount, remaining relief capacity, and category usage before generating your PDF record.</p>
-
-      <div class="summary-header" id="summary-header">
-        <div class="summary-stat">
-          <div class="label">Total Claimed</div>
-          <div class="value primary" id="total-claimed">RM 0.00</div>
-        </div>
-        <div class="summary-stat">
-          <div class="label">Remaining Capacity</div>
-          <div class="value success" id="total-remaining">RM 0.00</div>
-        </div>
-      </div>
-
-      <div id="category-bars"></div>
-
-      <div class="nav-buttons">
-        <button class="btn btn-outline" id="btn-back-2">&#10140; Back</button>
-        <button class="btn btn-primary" id="btn-next-2">Next: PDF &#10142;</button>
-      </div>
-    </div>
-
-    <!-- ═══════ SECTION 3: Convert to PDF ═══════ -->
-    <div class="section" id="section-3">
-      <h2 class="section-title">Convert Receipts to PDF</h2>
-      <p class="section-subtitle">Combine all confirmed receipt images into a single PDF document for tax preparation and record keeping.</p>
-
-      <div class="pdf-section">
-        <p id="pdf-info"></p>
-        <button class="btn btn-primary" id="btn-generate-pdf">Generate PDF</button>
-        <div id="pdf-loading" style="display:none; margin-top:1rem;">
-          <span class="spinner"></span> Generating PDF...
-        </div>
-        <div id="pdf-error" class="error-msg" style="display:none;"></div>
-        <div id="pdf-success" style="display:none; margin-top:1rem; color: var(--mint-dark); font-weight: 600;">
-          &#10003; Download started!
-        </div>
-      </div>
-
-      <div class="nav-buttons">
-        <button class="btn btn-outline" id="btn-back-3">&#10140; Back</button>
-        <div></div>
-      </div>
-    </div>
-  </div>
+  <div class="toast" id="save-toast" role="status" aria-live="polite"></div>
 
   <script>
-    // ── Malaysian Tax Relief Categories ──
     const TAX_RELIEF_CATEGORIES = [
-      { key: "education",              label: "Education",                      limit: 7000 },
-      { key: "book_resources",         label: "Book & Educational Resources",   limit: 1000 },
-      { key: "it_equipment",           label: "IT Equipment / Devices",         limit: 3000 },
-      { key: "medical",                label: "Medical Expenses",               limit: 15000 },
-      { key: "selfemployed",           label: "Self-Employed / Professional Fees", limit: 2500 },
-      { key: "insurance",              label: "Insurance Premiums",             limit: 3000 },
-      { key: "life_insurance",         label: "Life Insurance",                 limit: 3000 },
-      { key: "retirement",             label: "Retirement Contributions (CPF/EWK)", limit: Infinity },
-      { key: "healthcare",             label: "Healthcare",                     limit: 3000 },
-      { key: "renewable_energy",       label: "Renewable Energy Equipment",     limit: 800 },
-      { key: "residential",            label: "Residential Accommodation",      limit: 2500 },
+      { key: "education", label: "Education", limit: 7000, color: "#2F7A5C" },
+      { key: "book_resources", label: "Book & Educational Resources", limit: 1000, color: "#C4432B" },
+      { key: "it_equipment", label: "IT Equipment / Devices", limit: 3000, color: "#2D5B9A" },
+      { key: "medical", label: "Medical Expenses", limit: 15000, color: "#B8863B" },
+      { key: "selfemployed", label: "Self-Employed / Professional Fees", limit: 2500, color: "#6C5A94" },
+      { key: "insurance", label: "Insurance Premiums", limit: 3000, color: "#357C8A" },
+      { key: "life_insurance", label: "Life Insurance", limit: 3000, color: "#8B4B55" },
+      { key: "retirement", label: "Retirement Contributions (CPF/EWK)", limit: Infinity, color: "#4B6F44" },
+      { key: "healthcare", label: "Healthcare", limit: 3000, color: "#9A6A2D" },
+      { key: "renewable_energy", label: "Renewable Energy Equipment", limit: 800, color: "#557A38" },
+      { key: "residential", label: "Residential Accommodation", limit: 2500, color: "#7B6A55" },
     ];
 
-    // ── State ──
     let state = {
       receipts: [],
-      nextId: 1,
-      currentSection: 1,
+      pendingId: 1,
+      savingReceiptIds: [],
+      savingAllPending: false,
       authToken: localStorage.getItem('receiptManagerToken') || '',
       accountName: localStorage.getItem('receiptManagerAccount') || '',
       authMode: 'login',
     };
 
-    // ── DOM refs ──
     const authForm = document.getElementById('auth-form');
     const authSubmit = document.getElementById('auth-submit');
     const authError = document.getElementById('auth-error');
@@ -897,44 +168,81 @@
     const accountPasswordInput = document.getElementById('account-password');
     const currentUserEl = document.getElementById('current-user');
     const btnLogout = document.getElementById('btn-logout');
+    const dashboardSection = document.getElementById('dashboard-section');
+    const uploadSection = document.getElementById('upload-section');
+    const btnOpenUpload = document.getElementById('btn-open-upload');
+    const btnBackDashboard = document.getElementById('btn-back-dashboard');
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
     const pendingList = document.getElementById('pending-list');
-    const confirmedList = document.getElementById('confirmed-list');
-    const btnNext1 = document.getElementById('btn-next-1');
-    const btnBack2 = document.getElementById('btn-back-2');
-    const btnNext2 = document.getElementById('btn-next-2');
-    const btnBack3 = document.getElementById('btn-back-3');
-    const btnGeneratePdf = document.getElementById('btn-generate-pdf');
-    const pdfInfo = document.getElementById('pdf-info');
-    const pdfLoading = document.getElementById('pdf-loading');
-    const pdfError = document.getElementById('pdf-error');
-    const pdfSuccess = document.getElementById('pdf-success');
+    const pendingActions = document.getElementById('pending-actions');
     const totalClaimedEl = document.getElementById('total-claimed');
-    const totalRemainingEl = document.getElementById('total-remaining');
-    const categoryBarsEl = document.getElementById('category-bars');
-    const summaryHeaderEl = document.getElementById('summary-header');
+    const claimDonut = document.getElementById('claim-donut');
+    const categoryLegend = document.getElementById('category-legend');
+    const historyList = document.getElementById('history-list');
+    const receiptCount = document.getElementById('receipt-count');
+    const aiHeadline = document.getElementById('ai-headline');
+    const aiOverview = document.getElementById('ai-overview');
+    const aiTimeline = document.getElementById('ai-timeline');
+    const cacheChip = document.getElementById('cache-chip');
+    const btnGeneratePdf = document.getElementById('btn-generate-pdf');
+    const pdfStatus = document.getElementById('pdf-status');
+    const saveToast = document.getElementById('save-toast');
+    const advisorBubble = document.getElementById('advisor-bubble');
+    const advisorBox = document.getElementById('advisor-box');
+    const advisorClose = document.getElementById('advisor-close');
+    const advisorForm = document.getElementById('advisor-form');
+    const advisorInput = document.getElementById('advisor-input');
+    const advisorMessages = document.getElementById('advisor-messages');
+    let toastTimer = null;
 
-    // ── Helpers ──
     function fmt(n) {
-      return 'RM ' + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      return 'RM ' + Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     }
 
-    function getCategoryByKey(key) {
-      return TAX_RELIEF_CATEGORIES.find(c => c.key === key);
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function todayIso() {
+      return new Date().toISOString().slice(0, 10);
     }
 
     function authHeaders() {
       return { 'Authorization': `Bearer ${state.authToken}` };
     }
 
-    function showAuthError(message) {
-      authError.textContent = message;
-      authError.style.display = 'block';
+    async function readJson(resp) {
+      const text = await resp.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch (err) {
+        if (!resp.ok) return { detail: text || `Server responded with ${resp.status}` };
+        throw new Error(text || 'Invalid server response');
+      }
     }
 
-    function clearAuthError() {
-      authError.textContent = '';
+    function getCategoryByKey(key) {
+      return TAX_RELIEF_CATEGORIES.find(c => c.key === key);
+    }
+
+    function showToast(message) {
+      saveToast.textContent = message;
+      saveToast.classList.add('visible');
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => {
+        saveToast.classList.remove('visible');
+      }, 2600);
+    }
+
+    function setAuthMode(mode) {
+      state.authMode = mode;
+      loginTab.classList.toggle('active', mode === 'login');
+      signupTab.classList.toggle('active', mode === 'signup');
+      authSubmit.textContent = mode === 'login' ? 'Login' : 'Create account';
+      accountPasswordInput.autocomplete = mode === 'login' ? 'current-password' : 'new-password';
       authError.style.display = 'none';
     }
 
@@ -948,79 +256,470 @@
     }
 
     function clearAuthenticated() {
-      state.authToken = '';
-      state.accountName = '';
-      state.receipts = [];
-      state.nextId = 1;
-      fileInput.value = '';
+      state = { ...state, receipts: [], pendingId: 1, savingReceiptIds: [], savingAllPending: false, authToken: '', accountName: '' };
       localStorage.removeItem('receiptManagerToken');
       localStorage.removeItem('receiptManagerAccount');
       document.body.classList.remove('authenticated');
+      document.body.classList.remove('uploading');
+      advisorBox.classList.remove('open');
       currentUserEl.textContent = '';
-      renderPending();
-      renderConfirmed();
-      updateNavButtons();
-      totalClaimedEl.textContent = fmt(0);
-      totalRemainingEl.textContent = fmt(0);
-      categoryBarsEl.innerHTML = '';
-      pdfInfo.textContent = '';
-      pdfError.style.display = 'none';
-      pdfSuccess.style.display = 'none';
-      pdfLoading.style.display = 'none';
-      navigateToSection(1);
-    }
-
-    function setAuthMode(mode) {
-      state.authMode = mode;
-      loginTab.classList.toggle('active', mode === 'login');
-      signupTab.classList.toggle('active', mode === 'signup');
-      authSubmit.textContent = mode === 'login' ? 'Login' : 'Create account';
-      accountPasswordInput.autocomplete = mode === 'login' ? 'current-password' : 'new-password';
-      clearAuthError();
-    }
-
-    function populateCategorySelect(selectEl) {
-      selectEl.innerHTML = '<option value="">— Select category —</option>';
-      for (const cat of TAX_RELIEF_CATEGORIES) {
-        const opt = document.createElement('option');
-        opt.value = cat.key;
-        opt.textContent = `${cat.label} (limit ${cat.limit === Infinity ? 'no limit' : fmt(cat.limit)})`;
-        selectEl.appendChild(opt);
-      }
+      renderAll();
+      showDashboard();
     }
 
     async function loadSavedReceipts() {
       const resp = await fetch('/receipts', { headers: authHeaders() });
-      if (!resp.ok) {
-        throw new Error(`Server responded with ${resp.status}`);
-      }
-
       const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+
       state.receipts = data.receipts.map(r => ({
         id: r.id,
         receiptNumber: r.receipt_number,
+        title: r.title || `Receipt ${r.receipt_number}`,
+        receiptDate: r.receipt_date || (r.created_at || '').slice(0, 10),
         imageDataUrl: r.image_data_url || '',
         filename: r.filename || `receipt-${r.receipt_number}`,
         categoryKey: r.category_key,
-        amount: r.amount,
+        amount: Number(r.amount),
         confirmed: true,
       }));
-      state.nextId = Math.max(0, ...state.receipts.map(r => Number(r.receiptNumber) || r.id)) + 1;
+      renderAll();
+      loadAiSummary();
+    }
+
+    function renderAll() {
+      renderDashboard();
       renderPending();
-      renderConfirmed();
-      updateNavButtons();
+    }
+
+    function renderDashboard() {
+      const confirmed = state.receipts.filter(r => r.confirmed);
+      const claims = calculateClaimTotals(confirmed);
+      totalClaimedEl.textContent = fmt(claims.total);
+      receiptCount.textContent = String(confirmed.length);
+      renderDonut(claims.categories, claims.total);
+      renderHistory(confirmed);
+    }
+
+    function calculateClaimTotals(receipts) {
+      const grouped = new Map();
+      for (const r of receipts) {
+        grouped.set(r.categoryKey, (grouped.get(r.categoryKey) || 0) + Number(r.amount || 0));
+      }
+
+      const categories = [];
+      let total = 0;
+      for (const [key, amount] of grouped.entries()) {
+        const cat = getCategoryByKey(key);
+        if (!cat) continue;
+        const claimable = cat.limit === Infinity ? amount : Math.min(amount, cat.limit);
+        total += claimable;
+        categories.push({ ...cat, amount, claimable });
+      }
+
+      return { total, categories };
+    }
+
+    function renderDonut(categories, total) {
+      if (!total) {
+        claimDonut.style.background = '#EDE8D9';
+        categoryLegend.innerHTML = '<p class="empty">No claims yet.</p>';
+        return;
+      }
+
+      let start = 0;
+      const segments = [];
+      const legend = [];
+      for (const cat of categories) {
+        const end = start + (cat.claimable / total) * 100;
+        segments.push(`${cat.color} ${start}% ${end}%`);
+        legend.push(`
+          <div class="legend-item">
+            <span class="swatch" style="background:${cat.color}"></span>
+            <span>${escapeHtml(cat.label)}</span>
+            <strong>${fmt(cat.claimable)}</strong>
+          </div>
+        `);
+        start = end;
+      }
+      claimDonut.style.background = `conic-gradient(${segments.join(', ')})`;
+      categoryLegend.innerHTML = legend.join('');
+    }
+
+    function renderHistory(receipts) {
+      if (!receipts.length) {
+        historyList.innerHTML = '<p class="empty">No receipt history yet.</p>';
+        return;
+      }
+
+      historyList.innerHTML = receipts.slice().reverse().map(r => {
+        const cat = getCategoryByKey(r.categoryKey);
+        return `
+          <article class="history-item">
+            ${r.imageDataUrl ? `<img src="${r.imageDataUrl}" alt="">` : '<div class="thumb-fallback"></div>'}
+            <div>
+              <h3>${escapeHtml(r.title)}</h3>
+              <p>${escapeHtml(cat ? cat.label : 'Uncategorized')} · ${escapeHtml(r.receiptDate)}</p>
+            </div>
+            <strong>${fmt(r.amount)}</strong>
+            <button class="icon-btn" type="button" aria-label="Delete ${escapeHtml(r.title)}" data-delete-id="${r.id}">×</button>
+          </article>
+        `;
+      }).join('');
+
+      historyList.querySelectorAll('[data-delete-id]').forEach(button => {
+        button.addEventListener('click', () => deleteReceipt(Number(button.dataset.deleteId)));
+      });
+    }
+
+    async function loadAiSummary() {
+      cacheChip.textContent = 'Updating';
+      try {
+        const resp = await fetch('/ai-summary', { headers: authHeaders() });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+        aiHeadline.textContent = data.headline || 'Receipt summary';
+        aiOverview.textContent = data.overview || '';
+        cacheChip.textContent = data.cached ? 'Empty' : 'Fresh';
+        aiTimeline.innerHTML = (data.timeline || []).map(item => `
+          <article class="timeline-item">
+            <time>${escapeHtml(item.date || '')}</time>
+            <div>
+              <h3>${escapeHtml(item.title || 'Receipt')}</h3>
+              <p>${escapeHtml(item.summary || '')}</p>
+            </div>
+          </article>
+        `).join('') || '<p class="empty">The timeline will appear after your first upload.</p>';
+      } catch (err) {
+        cacheChip.textContent = 'Offline';
+        aiHeadline.textContent = 'Summary unavailable';
+        aiOverview.textContent = err.message;
+        aiTimeline.innerHTML = '';
+      }
+    }
+
+    function addAdvisorMessage(text, type = 'ai') {
+      const msg = document.createElement('p');
+      msg.className = `advisor-msg ${type}`;
+      msg.textContent = text;
+      advisorMessages.appendChild(msg);
+      advisorMessages.scrollTop = advisorMessages.scrollHeight;
+    }
+
+    async function askAdvisor(message) {
+      const resp = await fetch('/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ message }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+      return data.reply || 'I could not generate a reply.';
+    }
+
+    function populateCategorySelect(selectEl) {
+      selectEl.innerHTML = '<option value="">Select category</option>';
+      for (const cat of TAX_RELIEF_CATEGORIES) {
+        const opt = document.createElement('option');
+        opt.value = cat.key;
+        opt.textContent = `${cat.label} (${cat.limit === Infinity ? 'no limit' : fmt(cat.limit)})`;
+        selectEl.appendChild(opt);
+      }
+    }
+
+    function renderPending() {
+      const pending = state.receipts.filter(r => !r.confirmed);
+      if (!pending.length) {
+        pendingList.innerHTML = '<p class="empty">All uploaded receipts are saved. Add more files or go back to the dashboard when you are done.</p>';
+        pendingActions.innerHTML = '';
+        return;
+      }
+
+      pendingList.innerHTML = '';
+      for (const r of pending) {
+        const card = document.createElement('article');
+        card.className = 'receipt-card';
+        card.innerHTML = `
+          <img class="receipt-thumb" src="${r.imageDataUrl}" alt="">
+          <div class="receipt-fields">
+            <div class="field-grid">
+              <div class="field">
+                <label for="title-${r.id}">Title</label>
+                <input id="title-${r.id}" class="title-input" data-id="${r.id}" value="${escapeHtml(r.title || '')}" placeholder="Optional">
+              </div>
+              <div class="field">
+                <label for="date-${r.id}">Date</label>
+                <input id="date-${r.id}" class="date-input" data-id="${r.id}" type="date" value="${escapeHtml(r.receiptDate || '')}">
+              </div>
+              <div class="field">
+                <label for="amount-${r.id}">Amount</label>
+                <input id="amount-${r.id}" class="amount-input" data-id="${r.id}" type="number" min="0" step="0.01" placeholder="0.00" value="${r.amount || ''}">
+              </div>
+              <div class="field">
+                <label for="category-${r.id}">Category</label>
+                <select id="category-${r.id}" class="category-select" data-id="${r.id}"></select>
+              </div>
+            </div>
+            <div class="action-row">
+              <button class="btn btn-primary btn-sm confirm-btn" type="button" data-id="${r.id}" ${state.savingReceiptIds.includes(r.id) ? 'disabled' : ''}>${state.savingReceiptIds.includes(r.id) ? 'Saving...' : 'Save receipt'}</button>
+              <button class="btn btn-danger btn-sm remove-btn" type="button" data-id="${r.id}">Remove</button>
+            </div>
+          </div>
+        `;
+        pendingList.appendChild(card);
+        const select = card.querySelector('.category-select');
+        populateCategorySelect(select);
+        select.value = r.categoryKey || '';
+        card.querySelector('.confirm-btn').addEventListener('click', () => confirmReceipt(r.id));
+        card.querySelector('.remove-btn').addEventListener('click', () => removePending(r.id));
+      }
+
+      pendingActions.innerHTML = `
+        <button class="btn btn-primary" id="save-all-pending" type="button" ${state.savingAllPending ? 'disabled' : ''}>
+          ${state.savingAllPending ? 'Saving all...' : 'Save all receipts'}
+        </button>
+      `;
+      pendingActions.querySelector('#save-all-pending').addEventListener('click', saveAllPending);
+    }
+
+    function savePendingDrafts() {
+      for (const r of state.receipts.filter(item => !item.confirmed)) {
+        const amountInput = document.querySelector(`.amount-input[data-id="${r.id}"]`);
+        if (!amountInput) continue;
+        amountInput.classList.remove('input-error');
+        document.querySelector(`.category-select[data-id="${r.id}"]`).classList.remove('input-error');
+        amountInput.closest('.receipt-card').classList.remove('has-error');
+        r.title = document.querySelector(`.title-input[data-id="${r.id}"]`).value.trim();
+        r.receiptDate = document.querySelector(`.date-input[data-id="${r.id}"]`).value;
+        r.amount = parseFloat(amountInput.value) || 0;
+        r.categoryKey = document.querySelector(`.category-select[data-id="${r.id}"]`).value;
+      }
+    }
+
+    function markInvalid(id, selector) {
+      const field = document.querySelector(`${selector}[data-id="${id}"]`);
+      if (!field) return null;
+      field.classList.add('input-error');
+      field.closest('.receipt-card').classList.add('has-error');
+      return field;
+    }
+
+    function validatePending(ids) {
+      savePendingDrafts();
+      let firstInvalid = null;
+      for (const id of ids) {
+        const r = state.receipts.find(item => item.id === id && !item.confirmed);
+        if (!r) continue;
+        if (!r.amount || r.amount <= 0) firstInvalid = firstInvalid || markInvalid(id, '.amount-input');
+        if (!r.categoryKey) firstInvalid = firstInvalid || markInvalid(id, '.category-select');
+      }
+      if (firstInvalid) {
+        firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.setTimeout(() => firstInvalid.focus(), 250);
+        showToast('Fill in the highlighted receipt fields first.');
+        return false;
+      }
+      return true;
+    }
+
+    function receiptPayload(r) {
+      return {
+        receiptNumber: String(Date.now()) + '-' + Math.abs(r.id),
+        title: r.title || defaultTitle(r.categoryKey),
+        receiptDate: r.receiptDate || todayIso(),
+        amount: r.amount,
+        categoryKey: r.categoryKey,
+        filename: r.filename,
+        imageDataUrl: r.imageDataUrl,
+      };
+    }
+
+    function defaultTitle(categoryKey) {
+      const cat = getCategoryByKey(categoryKey);
+      const count = state.receipts.filter(r => r.confirmed && r.categoryKey === categoryKey).length + 1;
+      return `Receipt ${cat ? cat.label : 'Claim'} ${count}`;
+    }
+
+    async function confirmReceipt(id) {
+      if (state.savingReceiptIds.includes(id)) return false;
+      if (!validatePending([id])) return false;
+      const r = state.receipts.find(item => item.id === id);
+      if (!r) return false;
+
+      const payload = receiptPayload(r);
+      state.savingReceiptIds = [...state.savingReceiptIds, id];
+      renderPending();
+      try {
+        const resp = await fetch('/receipts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify(payload),
+        });
+        const data = await readJson(resp);
+        if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+
+        r.id = data.id;
+        r.title = data.title || payload.title;
+        r.receiptDate = data.receipt_date || payload.receiptDate;
+        r.amount = payload.amount;
+        r.categoryKey = payload.categoryKey;
+        r.confirmed = true;
+        state.savingReceiptIds = state.savingReceiptIds.filter(value => value !== id);
+        renderAll();
+        showUpload();
+        loadAiSummary();
+        showToast('Receipt saved successfully.');
+        return true;
+      } catch (err) {
+        state.savingReceiptIds = state.savingReceiptIds.filter(value => value !== id);
+        renderPending();
+        alert(`Failed to save receipt: ${err.message}`);
+        return false;
+      }
+    }
+
+    async function saveAllPending() {
+      if (state.savingAllPending) return;
+      const ids = state.receipts.filter(r => !r.confirmed).map(r => r.id);
+      if (!ids.length) return;
+      if (!validatePending(ids)) return;
+
+      const pending = ids.map(id => state.receipts.find(r => r.id === id)).filter(Boolean);
+      const payloads = pending.map(receiptPayload);
+
+      state.savingAllPending = true;
+      state.savingReceiptIds = [...new Set([...state.savingReceiptIds, ...ids])];
+      renderPending();
+      try {
+        const resp = await fetch('/receipts/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ receipts: payloads }),
+        });
+        const data = await readJson(resp);
+        if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+
+        (data.receipts || []).forEach((saved, index) => {
+          const r = pending[index];
+          if (!r) return;
+          const payload = payloads[index];
+          r.id = saved.id;
+          r.title = saved.title || payload.title;
+          r.receiptDate = saved.receipt_date || payload.receiptDate;
+          r.amount = payload.amount;
+          r.categoryKey = payload.categoryKey;
+          r.confirmed = true;
+        });
+        showToast(`${(data.receipts || []).length} receipts saved successfully.`);
+        renderAll();
+        showUpload();
+        loadAiSummary();
+      } catch (err) {
+        alert(`Failed to save receipts: ${err.message}`);
+      } finally {
+        state.savingAllPending = false;
+        state.savingReceiptIds = state.savingReceiptIds.filter(value => !ids.includes(value));
+        renderPending();
+      }
+    }
+
+    function removePending(id) {
+      savePendingDrafts();
+      state.receipts = state.receipts.filter(r => r.id !== id);
+      renderPending();
+    }
+
+    async function deleteReceipt(id) {
+      try {
+        const resp = await fetch(`/receipts/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+        state.receipts = state.receipts.filter(r => r.id !== id);
+        renderAll();
+        loadAiSummary();
+      } catch (err) {
+        alert(`Failed to delete receipt: ${err.message}`);
+      }
+    }
+
+    function handleFiles(fileList) {
+      savePendingDrafts();
+      for (const file of fileList) {
+        if (!file.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        reader.onload = e => {
+          state.receipts.push({
+            id: state.pendingId++ * -1,
+            title: '',
+            receiptDate: '',
+            imageDataUrl: e.target.result,
+            filename: file.name,
+            categoryKey: '',
+            amount: 0,
+            confirmed: false,
+          });
+          renderPending();
+          showUpload();
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function showUpload() {
+      document.body.classList.add('uploading');
+      advisorBox.classList.remove('open');
+      dashboardSection.style.display = 'none';
+      uploadSection.style.display = 'block';
+      btnOpenUpload.style.display = 'none';
+      uploadSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function showDashboard() {
+      document.body.classList.remove('uploading');
+      dashboardSection.style.display = 'block';
+      uploadSection.style.display = 'none';
+      btnOpenUpload.style.display = 'inline-flex';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     loginTab.addEventListener('click', () => setAuthMode('login'));
     signupTab.addEventListener('click', () => setAuthMode('signup'));
     btnLogout.addEventListener('click', clearAuthenticated);
+    btnOpenUpload.addEventListener('click', showUpload);
+    btnBackDashboard.addEventListener('click', showDashboard);
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', () => { handleFiles(fileInput.files); fileInput.value = ''; });
+    advisorBubble.addEventListener('click', () => advisorBox.classList.toggle('open'));
+    advisorClose.addEventListener('click', () => advisorBox.classList.remove('open'));
+    advisorForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const text = advisorInput.value.trim();
+      if (!text) return;
+      addAdvisorMessage(text, 'user');
+      advisorInput.value = '';
+      advisorInput.disabled = true;
+      try {
+        addAdvisorMessage(await askAdvisor(text));
+      } catch (err) {
+        addAdvisorMessage(err.message);
+      } finally {
+        advisorInput.disabled = false;
+        advisorInput.focus();
+      }
+    });
 
     authForm.addEventListener('submit', async e => {
       e.preventDefault();
-      clearAuthError();
+      authError.style.display = 'none';
       authSubmit.disabled = true;
       authSubmit.textContent = state.authMode === 'login' ? 'Logging in...' : 'Creating account...';
-
       try {
         const resp = await fetch(`/auth/${state.authMode}`, {
           method: 'POST',
@@ -1031,347 +730,36 @@
           }),
         });
         const data = await resp.json();
-
-        if (!resp.ok) {
-          throw new Error(data.detail || 'Authentication failed');
-        }
-
+        if (!resp.ok) throw new Error(data.detail || 'Authentication failed');
         setAuthenticated(data.token, data.account_name);
         accountPasswordInput.value = '';
         await loadSavedReceipts();
       } catch (err) {
-        showAuthError(err.message);
+        authError.textContent = err.message;
+        authError.style.display = 'block';
       } finally {
         authSubmit.disabled = false;
         authSubmit.textContent = state.authMode === 'login' ? 'Login' : 'Create account';
       }
     });
 
-    async function restoreSession() {
-      if (!state.authToken || !state.accountName) return;
-
-      setAuthenticated(state.authToken, state.accountName);
-      try {
-        await loadSavedReceipts();
-      } catch (err) {
-        clearAuthenticated();
-        showAuthError('Please log in again to continue.');
-      }
-    }
-
-    // ── File Handling ──
-    dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-    dropzone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropzone.classList.remove('dragover');
-      handleFiles(e.dataTransfer.files);
-    });
-    fileInput.addEventListener('change', () => { handleFiles(fileInput.files); fileInput.value = ''; });
-
-    function handleFiles(fileList) {
-      for (const file of fileList) {
-        if (!file.type.startsWith('image/')) continue;
-        const reader = new FileReader();
-        reader.onload = e => {
-          const receipt = {
-            id: state.nextId++,
-            receiptNumber: String(state.nextId - 1),
-            imageDataUrl: e.target.result,
-            filename: file.name,
-            categoryKey: '',
-            amount: 0,
-            confirmed: false,
-          };
-          state.receipts.push(receipt);
-          renderPending();
-          renderConfirmed();
-          updateNavButtons();
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-
-    // ── Render Pending Receipts ──
-    function renderPending() {
-      pendingList.innerHTML = '';
-      const pending = state.receipts.filter(r => !r.confirmed);
-      if (pending.length === 0) return;
-
-      for (const r of pending) {
-        const card = document.createElement('div');
-        card.className = 'receipt-card';
-        card.id = `pending-${r.id}`;
-        card.innerHTML = `
-          <img class="receipt-thumb" src="${r.imageDataUrl}" alt="receipt">
-          <div class="receipt-info">
-            <div class="receipt-label">
-              <span class="badge badge-pending">Receipt #${r.id}</span>
-            </div>
-            <div class="input-row">
-              <span class="rm-prefix">RM</span>
-              <input type="number" class="amount-input" placeholder="0.00" step="0.01" min="0"
-                     data-id="${r.id}" aria-label="Amount" value="${r.amount || ''}">
-              <select class="category-select" data-id="${r.id}" aria-label="Category">
-              </select>
-            </div>
-            <div class="action-row">
-              <button class="btn btn-primary btn-sm confirm-btn" data-id="${r.id}">Confirm</button>
-              <button class="btn btn-danger btn-sm remove-btn" data-id="${r.id}">Remove</button>
-            </div>
-          </div>
-        `;
-        pendingList.appendChild(card);
-
-        // Populate category select for this card
-        const sel = card.querySelector('.category-select');
-        populateCategorySelect(sel);
-        sel.value = r.categoryKey;
-
-        // Event listeners
-        card.querySelector('.confirm-btn').addEventListener('click', () => confirmReceipt(r.id));
-        card.querySelector('.remove-btn').addEventListener('click', () => removeReceipt(r.id));
-      }
-    }
-
-    // ── Render Confirmed Receipts ──
-    function renderConfirmed() {
-      confirmedList.innerHTML = '';
-      const confirmed = state.receipts.filter(r => r.confirmed);
-      for (const r of confirmed) {
-        const cat = getCategoryByKey(r.categoryKey);
-        const pill = document.createElement('div');
-        pill.className = 'confirmed-pill';
-        pill.innerHTML = `
-          ${r.imageDataUrl ? `<img src="${r.imageDataUrl}" alt="receipt">` : ''}
-          <span>#${r.receiptNumber || r.id}</span>
-          <span>${cat ? cat.label : '?'}</span>
-          <span class="pill-amt">${fmt(r.amount)}</span>
-          <button class="pill-delete" type="button" aria-label="Delete receipt #${r.receiptNumber || r.id}" data-id="${r.id}">&times;</button>
-        `;
-        confirmedList.appendChild(pill);
-        pill.querySelector('.pill-delete').addEventListener('click', () => deleteReceipt(r.id));
-      }
-    }
-
-    // ── Actions ──
-    async function confirmReceipt(id) {
-      const r = state.receipts.find(r => r.id === id);
-      if (!r) return;
-      const amount = parseFloat(document.querySelector(`.amount-input[data-id="${id}"]`).value);
-      const categoryKey = document.querySelector(`.category-select[data-id="${id}"]`).value;
-      if (!amount || amount <= 0) { alert('Please enter a valid amount.'); return; }
-      if (!categoryKey) { alert('Please select a category.'); return; }
-      r.amount = amount;
-      r.categoryKey = categoryKey;
-
-      try {
-        const resp = await fetch('/receipts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...authHeaders(),
-          },
-          body: JSON.stringify({
-            receiptNumber: r.receiptNumber || String(r.id),
-            amount: r.amount,
-            categoryKey: r.categoryKey,
-            filename: r.filename,
-            imageDataUrl: r.imageDataUrl,
-          }),
-        });
-        const data = await resp.json();
-
-        if (!resp.ok) {
-          throw new Error(data.detail || `Server responded with ${resp.status}`);
-        }
-
-        r.id = data.id;
-        r.confirmed = true;
-        // Remove pending card
-        const el = document.getElementById(`pending-${id}`);
-        if (el) el.remove();
-        renderConfirmed();
-        updateNavButtons();
-      } catch (err) {
-        alert(`Failed to save receipt: ${err.message}`);
-      }
-    }
-
-    function removeReceipt(id) {
-      state.receipts = state.receipts.filter(r => r.id !== id);
-      const el = document.getElementById(`pending-${id}`);
-      if (el) el.remove();
-      renderConfirmed();
-      updateNavButtons();
-    }
-
-    async function deleteReceipt(id) {
-      const receipt = state.receipts.find(r => r.id === id);
-      if (!receipt) return;
-
-      try {
-        if (receipt.confirmed) {
-          const resp = await fetch(`/receipts/${id}`, {
-            method: 'DELETE',
-            headers: authHeaders(),
-          });
-          const data = await resp.json();
-
-          if (!resp.ok) {
-            throw new Error(data.detail || `Server responded with ${resp.status}`);
-          }
-        }
-
-        state.receipts = state.receipts.filter(r => r.id !== id);
-        renderPending();
-        renderConfirmed();
-        updateNavButtons();
-        if (state.currentSection === 2) renderSummary();
-        if (state.currentSection === 3) renderPdfSection();
-      } catch (err) {
-        alert(`Failed to delete receipt: ${err.message}`);
-      }
-    }
-
-    function updateNavButtons() {
-      const hasConfirmed = state.receipts.some(r => r.confirmed);
-      btnNext1.disabled = !hasConfirmed;
-    }
-
-    // ── Section 2: Render Summary ──
-    async function renderSummary() {
-      const confirmed = state.receipts.filter(r => r.confirmed);
-
-      if (confirmed.length === 0) {
-        totalClaimedEl.textContent = fmt(0);
-        totalRemainingEl.textContent = fmt(0);
-        categoryBarsEl.innerHTML = '';
+    btnGeneratePdf.addEventListener('click', async () => {
+      const confirmed = state.receipts.filter(r => r.confirmed && r.imageDataUrl);
+      if (!confirmed.length) {
+        pdfStatus.textContent = 'Upload at least one receipt image first.';
         return;
       }
-
-      try {
-        const resp = await fetch('/tax-summary', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...authHeaders(),
-          },
-          body: JSON.stringify({})
-        });
-
-        if (!resp.ok) {
-          throw new Error(`Server responded with ${resp.status}`);
-        }
-
-        const result = await resp.json();
-
-        totalClaimedEl.textContent = fmt(result.total_claimed);
-        totalRemainingEl.textContent = fmt(result.total_remaining);
-
-        categoryBarsEl.innerHTML = '';
-
-        for (const item of result.categories) {
-          const bar = document.createElement('div');
-          bar.className = 'category-bar';
-
-          const displayPct = Math.min(item.percentage, 100);
-          const colorClass = item.percentage >= 100 ? 'red' : item.percentage >= 80 ? 'amber' : 'green';
-
-          bar.innerHTML = `
-            <div class="bar-label">
-              <span class="cat-name">${item.category_label}</span>
-              <span class="cat-amt">${fmt(item.amount)}</span>
-            </div>
-            <div class="bar-track">
-              <div class="bar-fill ${colorClass}" style="width: ${displayPct}%"></div>
-            </div>
-            <div class="bar-footer">
-              <span>${item.limit === null ? 'No limit' : 'Limit: ' + fmt(item.limit)}</span>
-              <span>Remaining: ${item.remaining === null ? 'No limit' : fmt(item.remaining)}</span>
-            </div>
-          `;
-
-          categoryBarsEl.appendChild(bar);
-        }
-      } catch (err) {
-        categoryBarsEl.innerHTML = `
-          <div class="error-msg">
-            Failed to calculate tax relief summary: ${err.message}
-          </div>
-        `;
-      }
-    }
-
-    // ── Section 3: Render PDF Info ──
-    function renderPdfSection() {
-      const confirmed = state.receipts.filter(r => r.confirmed);
-      pdfInfo.textContent = `All ${confirmed.length} receipt(s) will be combined into a single PDF document for your records.`;
-      pdfError.style.display = 'none';
-      pdfSuccess.style.display = 'none';
-      pdfLoading.style.display = 'none';
-      btnGeneratePdf.disabled = false;
-      btnGeneratePdf.textContent = 'Generate PDF';
-    }
-
-    // ── Navigation ──
-    function navigateToSection(n) {
-      state.currentSection = n;
-      // Update stepper
-      document.querySelectorAll('.step').forEach(el => {
-        const step = parseInt(el.dataset.step);
-        el.classList.remove('active', 'completed');
-        if (step === n) el.classList.add('active');
-        else if (step < n) el.classList.add('completed');
-      });
-      // Update sections
-      document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
-      document.getElementById(`section-${n}`).classList.add('active');
-      // Render section-specific content
-      if (n === 2) renderSummary();
-      if (n === 3) renderPdfSection();
-    }
-
-    // Stepper clicks
-    document.querySelectorAll('.step').forEach(el => {
-      el.addEventListener('click', () => {
-        const step = parseInt(el.dataset.step);
-        // Allow going to completed steps or current step; prevent jumping ahead
-        if (step <= state.currentSection + 1) navigateToSection(step);
-      });
-    });
-
-    btnNext1.addEventListener('click', () => navigateToSection(2));
-    btnBack2.addEventListener('click', () => navigateToSection(1));
-    btnNext2.addEventListener('click', () => navigateToSection(3));
-    btnBack3.addEventListener('click', () => navigateToSection(2));
-
-    // ── PDF Generation ──
-    btnGeneratePdf.addEventListener('click', async () => {
-      const confirmed = state.receipts.filter(r => r.confirmed);
-      if (confirmed.length === 0) return;
-
       btnGeneratePdf.disabled = true;
-      btnGeneratePdf.textContent = 'Generating PDF...';
-      pdfLoading.style.display = 'block';
-      pdfError.style.display = 'none';
-      pdfSuccess.style.display = 'none';
-
+      pdfStatus.textContent = 'Generating PDF...';
       try {
-        // Decode data URLs to blobs
         const formData = new FormData();
         for (const r of confirmed) {
           const res = await fetch(r.imageDataUrl);
-          const blob = await res.blob();
-          formData.append('files', blob, r.filename);
+          formData.append('files', await res.blob(), r.filename);
         }
-
         const resp = await fetch('/convert-pdf', { method: 'POST', body: formData });
         if (!resp.ok) throw new Error(`Server responded with ${resp.status}`);
-
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(await resp.blob());
         const a = document.createElement('a');
         a.href = url;
         a.download = 'tax_receipts.pdf';
@@ -1379,19 +767,28 @@
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-
-        pdfSuccess.style.display = 'block';
+        pdfStatus.textContent = 'Download started.';
       } catch (err) {
-        pdfError.textContent = 'Failed to generate PDF: ' + err.message;
-        pdfError.style.display = 'block';
+        pdfStatus.textContent = `Failed to generate PDF: ${err.message}`;
       } finally {
-        pdfLoading.style.display = 'none';
         btnGeneratePdf.disabled = false;
-        btnGeneratePdf.textContent = 'Generate PDF';
       }
     });
 
+    async function restoreSession() {
+      if (!state.authToken || !state.accountName) return;
+      setAuthenticated(state.authToken, state.accountName);
+      try {
+        await loadSavedReceipts();
+      } catch (err) {
+        clearAuthenticated();
+        authError.textContent = 'Please log in again to continue.';
+        authError.style.display = 'block';
+      }
+    }
+
     setAuthMode('login');
+    showDashboard();
     restoreSession();
   </script>
 </body>

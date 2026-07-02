@@ -1,5 +1,6 @@
 import httpx
 import io
+import json
 import os
 
 from pathlib import Path
@@ -11,8 +12,23 @@ from fastapi.templating import Jinja2Templates
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
-STATIC_DIR = BASE_DIR / "image"
+STATIC_DIR = BASE_DIR / "static"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080").rstrip("/")
+
+
+def response_data(resp: httpx.Response):
+    try:
+        return resp.json()
+    except json.JSONDecodeError:
+        return None
+
+
+def response_detail(resp: httpx.Response, fallback: str) -> str:
+    data = response_data(resp)
+    if isinstance(data, dict) and data.get("detail"):
+        return str(data["detail"])
+    text = resp.text.strip()
+    return text or fallback
 
 
 def create_app() -> FastAPI:
@@ -78,9 +94,9 @@ async def tax_summary(request: Request):
         )
 
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail="Backend tax summary failed")
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Backend tax summary failed"))
 
-    return resp.json()
+    return response_data(resp)
 
 
 @app.post("/auth/signup")
@@ -90,9 +106,9 @@ async def signup(request: Request):
         resp = await client.post(f"{BACKEND_URL}/auth/signup", json=data)
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Signup failed"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Signup failed"))
 
-    return resp.json()
+    return response_data(resp)
 
 
 @app.post("/auth/login")
@@ -102,9 +118,9 @@ async def login(request: Request):
         resp = await client.post(f"{BACKEND_URL}/auth/login", json=data)
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Login failed"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Login failed"))
 
-    return resp.json()
+    return response_data(resp)
 
 
 @app.post("/admin/auth/login")
@@ -114,9 +130,9 @@ async def admin_login(request: Request):
         resp = await client.post(f"{BACKEND_URL}/admin/auth/login", json=data)
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Admin login failed"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Admin login failed"))
 
-    return resp.json()
+    return response_data(resp)
 
 
 @app.get("/admin/accounts")
@@ -129,9 +145,9 @@ async def admin_accounts(request: Request):
         )
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to load accounts"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load accounts"))
 
-    return resp.json()
+    return response_data(resp)
 
 
 @app.post("/admin/accounts/reset-password")
@@ -146,9 +162,9 @@ async def admin_reset_password(request: Request):
         )
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to reset password"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to reset password"))
 
-    return resp.json()
+    return response_data(resp)
 
 
 @app.get("/receipts")
@@ -161,9 +177,43 @@ async def get_receipts(request: Request):
         )
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to load receipts"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load receipts"))
 
-    return resp.json()
+    return response_data(resp)
+
+
+@app.get("/ai-summary")
+async def ai_summary(request: Request):
+    auth_header = request.headers.get("authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{BACKEND_URL}/ai-summary",
+            headers={"Authorization": auth_header} if auth_header else None,
+            timeout=20,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load AI summary"))
+
+    return response_data(resp)
+
+
+@app.post("/ai-chat")
+async def ai_chat(request: Request):
+    auth_header = request.headers.get("authorization")
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/ai-chat",
+            json=data,
+            headers={"Authorization": auth_header} if auth_header else None,
+            timeout=20,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "AI chat failed"))
+
+    return response_data(resp)
 
 
 @app.post("/receipts")
@@ -178,9 +228,26 @@ async def add_receipt(request: Request):
         )
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to save receipt"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to save receipt"))
 
-    return resp.json()
+    return response_data(resp)
+
+
+@app.post("/receipts/batch")
+async def add_receipts_batch(request: Request):
+    auth_header = request.headers.get("authorization")
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/receipts/batch",
+            json=data,
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to save receipts"))
+
+    return response_data(resp)
 
 
 @app.delete("/receipts/{receipt_id}")
@@ -193,6 +260,6 @@ async def delete_receipt(receipt_id: int, request: Request):
         )
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp.json().get("detail", "Failed to delete receipt"))
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to delete receipt"))
 
-    return resp.json()
+    return response_data(resp)
