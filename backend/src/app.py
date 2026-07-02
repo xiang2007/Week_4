@@ -29,7 +29,8 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 OCR_PROVIDER = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
 if OCR_PROVIDER not in {"manual", "gemini", "paddle"}:
     OCR_PROVIDER = "gemini"
-MAX_RECEIPT_AMOUNT = float(os.getenv("MAX_RECEIPT_AMOUNT", "1000000000000"))
+MAX_RECEIPT_AMOUNT = float(os.getenv("MAX_RECEIPT_AMOUNT", "100000"))
+MIN_RECEIPT_AMOUNT = 0.01
 
 
 def hash_password(password: str) -> str:
@@ -125,8 +126,8 @@ def require_admin(authorization: Optional[str]) -> None:
 
 
 def validate_receipt_amount(amount: float) -> None:
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    if amount < MIN_RECEIPT_AMOUNT:
+        raise HTTPException(status_code=400, detail="Amount must be at least RM 0.01")
     if amount > MAX_RECEIPT_AMOUNT:
         raise HTTPException(
             status_code=400,
@@ -138,7 +139,7 @@ def calculate_summary(receipts: list["ReceiptItem"]):
     aggregated = {}
 
     for receipt in receipts:
-        if receipt.amount <= 0:
+        if receipt.amount < MIN_RECEIPT_AMOUNT:
             continue
 
         if receipt.categoryKey not in TAX_RELIEF_CATEGORIES:
@@ -377,7 +378,8 @@ def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
     prompt = (
         "You are a concise personal finance assistant for tax receipt planning. "
         "Use only the user's receipt records below. Do not provide legal, investment, or tax filing advice. "
-        "Keep the answer under 70 words and give practical next steps.\n"
+        "Keep the answer under 70 words and give practical next steps. "
+        "Return plain text only. Do not use Markdown, bold markers, bullets, numbered lists, or headings.\n"
         f"Receipts: {json.dumps(compact_receipts, ensure_ascii=True)}\n"
         f"User question: {message}"
     )

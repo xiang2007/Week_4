@@ -37,9 +37,21 @@
     const Icon = ({ name, size = 18 }) => <i data-lucide={name} style={{ width: size, height: size }} aria-hidden="true"></i>;
     const fmt = value => 'RM ' + Number(value || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     const MAX_RECEIPT_AMOUNT = 100000;
+    const MIN_RECEIPT_AMOUNT = 0.01;
+    const MAX_ANNUAL_INCOME = 1000000000000;
     const todayIso = () => new Date().toISOString().slice(0, 10);
     const categoryByKey = key => TAX_RELIEF_CATEGORIES.find(c => c.key === key);
     const authHeaders = token => ({ Authorization: `Bearer ${token}` });
+    const plainChatText = text => String(text || '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/__(.*?)__/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/_(.*?)_/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^\s*[-*]\s+/gm, '')
+      .replace(/^\s*\d+\.\s+/gm, '')
+      .trim();
     const RESIDENT_TAX_BRACKETS = [
       { upTo: 5000, base: 0, rate: 0 },
       { upTo: 20000, base: 0, rate: 0.01 },
@@ -133,7 +145,7 @@
       const pending = receipts.filter(r => !r.confirmed);
       const claims = useMemo(() => calculateClaimTotals(confirmed), [confirmed]);
       const duplicates = useMemo(() => duplicateGroups(confirmed), [confirmed]);
-      const pendingReviewCount = pending.filter(r => r.needsReview || !r.amount || r.amount > MAX_RECEIPT_AMOUNT || !r.categoryKey).length;
+      const pendingReviewCount = pending.filter(r => r.needsReview || !r.amount || r.amount < MIN_RECEIPT_AMOUNT || r.amount > MAX_RECEIPT_AMOUNT || !r.categoryKey).length;
       const visibleReceipts = useMemo(() => {
         const q = filters.query.toLowerCase();
         return confirmed.filter(r => {
@@ -292,11 +304,11 @@
       }
 
       function validatePending(ids) {
-        const invalid = receipts.find(r => ids.includes(r.id) && !r.confirmed && (!r.amount || r.amount <= 0 || r.amount > MAX_RECEIPT_AMOUNT || !r.categoryKey));
+        const invalid = receipts.find(r => ids.includes(r.id) && !r.confirmed && (!r.amount || r.amount < MIN_RECEIPT_AMOUNT || r.amount > MAX_RECEIPT_AMOUNT || !r.categoryKey));
         if (invalid) {
           const node = document.querySelector(`[data-pending-card="${invalid.id}"]`);
           node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          setToast(invalid.amount > MAX_RECEIPT_AMOUNT ? `Receipt amount must be ${fmt(MAX_RECEIPT_AMOUNT)} or less.` : 'Fill in the highlighted receipt fields first.');
+          setToast(invalid.amount > MAX_RECEIPT_AMOUNT ? `Receipt amount must be ${fmt(MAX_RECEIPT_AMOUNT)} or less.` : 'Amount must be at least RM 0.01 and category must be selected.');
           return false;
         }
         return true;
@@ -518,7 +530,7 @@
           });
           const data = await readJson(resp);
           if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
-          setMessages(items => [...items, { type: 'ai', text: data.reply || 'I could not generate a reply.' }]);
+          setMessages(items => [...items, { type: 'ai', text: plainChatText(data.reply || 'I could not generate a reply.') }]);
         } catch (err) {
           setMessages(items => [...items, { type: 'ai', text: err.message }]);
         } finally {
@@ -810,7 +822,7 @@
               <div className="planner-input-grid">
                 <div className="field">
                   <label>Annual income</label>
-                  <input type="number" min="0" step="100" value={annualIncome || ''} onChange={e => setAnnualIncome(parseFloat(e.target.value) || 0)} placeholder="0.00" />
+                  <input type="number" min="0" max={MAX_ANNUAL_INCOME} step="100" value={annualIncome || ''} onChange={e => setAnnualIncome(Math.min(parseFloat(e.target.value) || 0, MAX_ANNUAL_INCOME))} placeholder="0.00" />
                 </div>
                 <div className="field">
                   <label>Tax rebate amount</label>
@@ -894,7 +906,7 @@
 
     function PendingCard({ receipt, confirmed, extracting, saving, updateReceipt, removePending, confirmReceipt, openPreview }) {
       const duplicate = receipt.amount && receipt.categoryKey && receipt.receiptDate && confirmed.some(r => Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) && r.receiptDate === receipt.receiptDate && r.categoryKey === receipt.categoryKey);
-      const amountInvalid = !receipt.amount || receipt.amount <= 0 || receipt.amount > MAX_RECEIPT_AMOUNT;
+      const amountInvalid = !receipt.amount || receipt.amount < MIN_RECEIPT_AMOUNT || receipt.amount > MAX_RECEIPT_AMOUNT;
       const categoryInvalid = !receipt.categoryKey;
       return (
         <article className={`receipt-card ${receipt.needsReview || duplicate ? 'has-warning' : ''} ${amountInvalid || categoryInvalid ? 'has-error' : ''}`} data-pending-card={receipt.id}>
@@ -904,11 +916,12 @@
             {receipt.extractionMessage && <p className="receipt-note warning">{receipt.extractionMessage}</p>}
             {duplicate && <p className="receipt-note warning">Possible duplicate receipt.</p>}
             {receipt.needsReview && <p className="receipt-note warning">Review suggested before saving.</p>}
+            {receipt.amount > 0 && receipt.amount < MIN_RECEIPT_AMOUNT && <p className="receipt-note warning">Amount must be at least RM 0.01.</p>}
             {receipt.amount > MAX_RECEIPT_AMOUNT && <p className="receipt-note warning">Amount must be {fmt(MAX_RECEIPT_AMOUNT)} or less.</p>}
             <div className="field-grid">
               <div className="field"><label>Title</label><input value={receipt.title || ''} onChange={e => updateReceipt(receipt.id, { title: e.target.value })} placeholder="Optional" /></div>
               <div className="field"><label>Date</label><input value={receipt.receiptDate || ''} onChange={e => updateReceipt(receipt.id, { receiptDate: e.target.value })} type="date" /></div>
-              <div className="field"><label>Amount</label><input className={amountInvalid ? 'input-error' : ''} value={receipt.amount || ''} onChange={e => updateReceipt(receipt.id, { amount: parseFloat(e.target.value) || 0 })} type="number" min="0" max={MAX_RECEIPT_AMOUNT} step="0.01" placeholder="0.00" /></div>
+              <div className="field"><label>Amount</label><input className={amountInvalid ? 'input-error' : ''} value={receipt.amount || ''} onChange={e => updateReceipt(receipt.id, { amount: parseFloat(e.target.value) || 0 })} type="number" min={MIN_RECEIPT_AMOUNT} max={MAX_RECEIPT_AMOUNT} step="0.01" placeholder="0.00" /></div>
               <div className="field"><label>Category</label><select className={categoryInvalid ? 'input-error' : ''} value={receipt.categoryKey || ''} onChange={e => updateReceipt(receipt.id, { categoryKey: e.target.value })}><option value="">Select category</option>{TAX_RELIEF_CATEGORIES.map(cat => <option key={cat.key} value={cat.key}>{cat.label} ({cat.limit === Infinity ? 'no limit' : fmt(cat.limit)})</option>)}</select></div>
             </div>
             <div className="action-row">
