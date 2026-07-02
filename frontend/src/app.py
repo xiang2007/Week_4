@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -14,6 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080").rstrip("/")
+BACKEND_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 
 def response_data(resp: httpx.Response):
@@ -33,6 +34,15 @@ def response_detail(resp: httpx.Response, fallback: str) -> str:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Frontend Server")
+
+    @app.exception_handler(httpx.RequestError)
+    async def backend_connection_error(request: Request, exc: httpx.RequestError):
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": f"Could not connect to backend at {BACKEND_URL}. Check the frontend BACKEND_URL environment variable."
+            },
+        )
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -61,7 +71,7 @@ async def convert_pdf(files: list[UploadFile] = File(...)):
         ("files", (f.filename, f.file, f.content_type))
         for f in files
     ]
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/process",
             files=file_tuples
@@ -86,7 +96,7 @@ async def tax_summary(request: Request):
     if not auth_header:
         data = await request.json()
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/tax-summary",
             json=data,
@@ -102,7 +112,7 @@ async def tax_summary(request: Request):
 @app.post("/auth/signup")
 async def signup(request: Request):
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(f"{BACKEND_URL}/auth/signup", json=data)
 
     if resp.status_code >= 400:
@@ -114,7 +124,7 @@ async def signup(request: Request):
 @app.post("/auth/login")
 async def login(request: Request):
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(f"{BACKEND_URL}/auth/login", json=data)
 
     if resp.status_code >= 400:
@@ -126,7 +136,7 @@ async def login(request: Request):
 @app.post("/admin/auth/login")
 async def admin_login(request: Request):
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(f"{BACKEND_URL}/admin/auth/login", json=data)
 
     if resp.status_code >= 400:
@@ -138,7 +148,7 @@ async def admin_login(request: Request):
 @app.get("/admin/accounts")
 async def admin_accounts(request: Request):
     auth_header = request.headers.get("authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/admin/accounts",
             headers={"Authorization": auth_header} if auth_header else None,
@@ -153,7 +163,7 @@ async def admin_accounts(request: Request):
 @app.get("/admin/insights")
 async def admin_insights(request: Request):
     auth_header = request.headers.get("authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/admin/insights",
             headers={"Authorization": auth_header} if auth_header else None,
@@ -169,7 +179,7 @@ async def admin_insights(request: Request):
 async def admin_reset_password(request: Request):
     auth_header = request.headers.get("authorization")
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/admin/accounts/reset-password",
             json=data,
@@ -185,7 +195,7 @@ async def admin_reset_password(request: Request):
 @app.get("/receipts")
 async def get_receipts(request: Request):
     auth_header = request.headers.get("authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/receipts",
             headers={"Authorization": auth_header} if auth_header else None,
@@ -200,7 +210,7 @@ async def get_receipts(request: Request):
 @app.get("/ocr-config")
 async def ocr_config(request: Request):
     auth_header = request.headers.get("authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/ocr-config",
             headers={"Authorization": auth_header} if auth_header else None,
@@ -215,7 +225,7 @@ async def ocr_config(request: Request):
 @app.get("/ai-summary")
 async def ai_summary(request: Request):
     auth_header = request.headers.get("authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/ai-summary",
             headers={"Authorization": auth_header} if auth_header else None,
@@ -232,7 +242,7 @@ async def ai_summary(request: Request):
 async def ai_chat(request: Request):
     auth_header = request.headers.get("authorization")
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/ai-chat",
             json=data,
@@ -250,7 +260,7 @@ async def ai_chat(request: Request):
 async def add_receipt(request: Request):
     auth_header = request.headers.get("authorization")
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/receipts",
             json=data,
@@ -267,7 +277,7 @@ async def add_receipt(request: Request):
 async def add_receipts_batch(request: Request):
     auth_header = request.headers.get("authorization")
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/receipts/batch",
             json=data,
@@ -284,7 +294,7 @@ async def add_receipts_batch(request: Request):
 async def extract_receipt(request: Request):
     auth_header = request.headers.get("authorization")
     data = await request.json()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/receipts/extract",
             json=data,
@@ -301,7 +311,7 @@ async def extract_receipt(request: Request):
 @app.delete("/receipts/{receipt_id}")
 async def delete_receipt(receipt_id: int, request: Request):
     auth_header = request.headers.get("authorization")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.delete(
             f"{BACKEND_URL}/receipts/{receipt_id}",
             headers={"Authorization": auth_header} if auth_header else None,

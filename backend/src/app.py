@@ -29,6 +29,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 OCR_PROVIDER = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
 if OCR_PROVIDER not in {"manual", "gemini", "paddle"}:
     OCR_PROVIDER = "gemini"
+MAX_RECEIPT_AMOUNT = float(os.getenv("MAX_RECEIPT_AMOUNT", "1000000000000"))
 
 
 def hash_password(password: str) -> str:
@@ -121,6 +122,16 @@ def require_admin(authorization: Optional[str]) -> None:
     token = authorization.removeprefix("Bearer ").strip()
     if token not in ADMIN_TOKENS:
         raise HTTPException(status_code=401, detail="Invalid or expired admin login")
+
+
+def validate_receipt_amount(amount: float) -> None:
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    if amount > MAX_RECEIPT_AMOUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Amount cannot exceed RM {MAX_RECEIPT_AMOUNT:,.2f}",
+        )
 
 
 def calculate_summary(receipts: list["ReceiptItem"]):
@@ -684,8 +695,7 @@ def create_backend() -> FastAPI:
         authorization: Optional[str] = Header(default=None),
     ):
         account_name = require_user(authorization)
-        if payload.amount <= 0:
-            raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+        validate_receipt_amount(payload.amount)
         if payload.categoryKey not in TAX_RELIEF_CATEGORIES:
             raise HTTPException(status_code=400, detail="Unknown category")
 
@@ -727,8 +737,7 @@ def create_backend() -> FastAPI:
         if not payload.receipts:
             raise HTTPException(status_code=400, detail="No receipts to save")
         for receipt in payload.receipts:
-            if receipt.amount <= 0:
-                raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+            validate_receipt_amount(receipt.amount)
             if receipt.categoryKey not in TAX_RELIEF_CATEGORIES:
                 raise HTTPException(status_code=400, detail="Unknown category")
 
