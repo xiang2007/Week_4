@@ -209,6 +209,10 @@ class ReceiptBatchCreate(BaseModel):
     receipts: list[ReceiptCreate]
 
 
+class ReceiptExtractRequest(BaseModel):
+    imageDataUrl: str
+
+
 class AiChatRequest(BaseModel):
     message: str
 
@@ -369,6 +373,71 @@ def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
         return "I could not reach Gemini right now. Try again in a moment."
 
 
+def generate_gemini_receipt_extract(image_data_url: str) -> dict:
+    fallback = {
+        "title": "",
+        "receiptDate": "",
+        "amount": 0,
+        "categoryKey": "",
+        "confidence": 0,
+        "needsReview": True,
+    }
+    if not GEMINI_API_KEY:
+        return fallback
+
+    match = re.fullmatch(r"data:(image/(?:png|jpeg|jpg));base64,(.+)", image_data_url)
+    if not match:
+        return fallback
+
+    categories = [
+        {"key": key, "label": value["label"]}
+        for key, value in TAX_RELIEF_CATEGORIES.items()
+    ]
+    prompt = (
+        "Extract receipt fields as compact JSON only. Return keys: title, receiptDate, amount, "
+        "categoryKey, confidence, needsReview. receiptDate must be YYYY-MM-DD if visible. "
+        "amount must be the total paid as a number. categoryKey must be one of these category keys "
+        "or empty string if unsure. confidence is 0-1. needsReview true if any important field is uncertain.\n"
+        f"Categories: {json.dumps(categories, ensure_ascii=True)}"
+    )
+    body = json.dumps({
+        "contents": [{
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": match.group(1).replace("jpg", "jpeg"), "data": match.group(2)}},
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "response_mime_type": "application/json",
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        parsed = json.loads(data["candidates"][0]["content"]["parts"][0]["text"])
+        category_key = str(parsed.get("categoryKey") or "")
+        if category_key and category_key not in TAX_RELIEF_CATEGORIES:
+            category_key = ""
+        return {
+            "title": str(parsed.get("title") or ""),
+            "receiptDate": str(parsed.get("receiptDate") or ""),
+            "amount": float(parsed.get("amount") or 0),
+            "categoryKey": category_key,
+            "confidence": max(0, min(1, float(parsed.get("confidence") or 0))),
+            "needsReview": bool(parsed.get("needsReview", True)),
+        }
+    except (urllib.error.URLError, KeyError, ValueError, json.JSONDecodeError, TimeoutError):
+        return fallback
+
+
 def clear_ai_summary_cache(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM ai_summaries WHERE id = 1")
 
@@ -466,6 +535,50 @@ def create_backend() -> FastAPI:
                 }
                 for row in rows
             ]
+        }
+
+    @app.get("/admin/insights")
+    async def admin_insights(authorization: Optional[str] = Header(default=None)):
+        require_admin(authorization)
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            accounts = conn.execute(
+                "SELECT account_name, created_at FROM accounts ORDER BY created_at DESC"
+            ).fetchall()
+
+        total_receipts = 0
+        category_counts: dict[str, int] = {}
+        newest_upload = None
+        for account in accounts:
+            path = user_db_path(account["account_name"])
+            if not path.exists():
+                continue
+            init_user_db(account["account_name"])
+            with sqlite3.connect(path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT category_key, created_at FROM receipts ORDER BY created_at DESC"
+                ).fetchall()
+            total_receipts += len(rows)
+            if rows and (newest_upload is None or rows[0]["created_at"] > newest_upload):
+                newest_upload = rows[0]["created_at"]
+            for row in rows:
+                category_counts[row["category_key"]] = category_counts.get(row["category_key"], 0) + 1
+
+        top_categories = sorted(
+            [
+                {"category": TAX_RELIEF_CATEGORIES[key]["label"], "count": count}
+                for key, count in category_counts.items()
+                if key in TAX_RELIEF_CATEGORIES
+            ],
+            key=lambda item: item["count"],
+            reverse=True,
+        )[:5]
+        return {
+            "account_count": len(accounts),
+            "receipt_count": total_receipts,
+            "newest_upload": newest_upload,
+            "top_categories": top_categories,
         }
 
     @app.post("/admin/accounts/reset-password")
@@ -612,6 +725,14 @@ def create_backend() -> FastAPI:
             clear_ai_summary_cache(conn)
 
         return {"receipts": saved}
+
+    @app.post("/receipts/extract")
+    async def extract_receipt(
+        payload: ReceiptExtractRequest,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        require_user(authorization)
+        return generate_gemini_receipt_extract(payload.imageDataUrl)
 
     @app.delete("/receipts/{receipt_id}")
     async def delete_receipt(

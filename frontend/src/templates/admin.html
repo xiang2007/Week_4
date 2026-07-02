@@ -189,6 +189,35 @@
       flex-wrap: wrap;
     }
 
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .insight-card {
+      padding: 1rem;
+      background: var(--paper-dim);
+      border: 1.5px solid var(--line);
+      border-radius: 0.85rem;
+    }
+
+    .insight-card span {
+      display: block;
+      margin-bottom: 0.35rem;
+      color: var(--ink-soft);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .insight-card strong {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+    }
+
     .count {
       font-family: var(--font-mono);
       color: var(--ink-soft);
@@ -272,6 +301,7 @@
     }
 
     @media (max-width: 760px) {
+      .insight-grid,
       .reset-grid {
         grid-template-columns: 1fr;
       }
@@ -324,6 +354,13 @@
       </div>
 
       <div class="status" id="admin-status"></div>
+
+      <div class="insight-grid" id="admin-insights">
+        <div class="insight-card"><span>Accounts</span><strong id="insight-accounts">0</strong></div>
+        <div class="insight-card"><span>Receipts</span><strong id="insight-receipts">0</strong></div>
+        <div class="insight-card"><span>Latest upload</span><strong id="insight-latest">-</strong></div>
+        <div class="insight-card"><span>Top category</span><strong id="insight-category">-</strong></div>
+      </div>
 
       <div class="reset-panel" id="reset-panel">
         <p class="subtitle">Reset password for the selected account.</p>
@@ -378,6 +415,10 @@
     const resetAccountInput = document.getElementById('reset-account');
     const resetPasswordInput = document.getElementById('reset-password-input');
     const resetSubmit = document.getElementById('reset-submit');
+    const insightAccounts = document.getElementById('insight-accounts');
+    const insightReceipts = document.getElementById('insight-receipts');
+    const insightLatest = document.getElementById('insight-latest');
+    const insightCategory = document.getElementById('insight-category');
 
     function showError(message) {
       errorEl.textContent = message;
@@ -452,16 +493,25 @@
 
     async function loadAccounts() {
       accountCount.textContent = 'Loading accounts...';
-      const resp = await fetch('/admin/accounts', {
-        headers: { 'Authorization': `Bearer ${state.token}` },
-      });
-      const data = await resp.json();
+      const headers = { 'Authorization': `Bearer ${state.token}` };
+      const [accountsResp, insightsResp] = await Promise.all([
+        fetch('/admin/accounts', { headers }),
+        fetch('/admin/insights', { headers }),
+      ]);
+      const data = await accountsResp.json();
 
-      if (!resp.ok) {
-        throw new Error(data.detail || `Server responded with ${resp.status}`);
+      if (!accountsResp.ok) {
+        throw new Error(data.detail || `Server responded with ${accountsResp.status}`);
       }
 
       renderAccounts(data.accounts);
+      if (insightsResp.ok) {
+        const insights = await insightsResp.json();
+        insightAccounts.textContent = String(insights.account_count || 0);
+        insightReceipts.textContent = String(insights.receipt_count || 0);
+        insightLatest.textContent = insights.newest_upload ? insights.newest_upload.slice(0, 10) : '-';
+        insightCategory.textContent = (insights.top_categories || [])[0]?.category || '-';
+      }
     }
 
     form.addEventListener('submit', async e => {

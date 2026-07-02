@@ -150,6 +150,21 @@ async def admin_accounts(request: Request):
     return response_data(resp)
 
 
+@app.get("/admin/insights")
+async def admin_insights(request: Request):
+    auth_header = request.headers.get("authorization")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{BACKEND_URL}/admin/insights",
+            headers={"Authorization": auth_header} if auth_header else None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load insights"))
+
+    return response_data(resp)
+
+
 @app.post("/admin/accounts/reset-password")
 async def admin_reset_password(request: Request):
     auth_header = request.headers.get("authorization")
@@ -246,6 +261,24 @@ async def add_receipts_batch(request: Request):
 
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to save receipts"))
+
+    return response_data(resp)
+
+
+@app.post("/receipts/extract")
+async def extract_receipt(request: Request):
+    auth_header = request.headers.get("authorization")
+    data = await request.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/receipts/extract",
+            json=data,
+            headers={"Authorization": auth_header} if auth_header else None,
+            timeout=30,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to extract receipt"))
 
     return response_data(resp)
 

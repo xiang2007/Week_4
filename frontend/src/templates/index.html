@@ -51,8 +51,18 @@
           <p class="eyebrow">Claims dashboard</p>
           <h1>Tax receipts</h1>
         </div>
-        <button class="btn btn-outline" id="btn-generate-pdf" type="button">Generate PDF</button>
+        <div class="toolbar-actions">
+          <button class="btn btn-outline" id="btn-export-csv" type="button">Export CSV</button>
+          <button class="btn btn-outline" id="btn-generate-pdf" type="button">Generate PDF</button>
+        </div>
       </div>
+
+      <section class="dashboard-tools">
+        <input id="receipt-search" type="search" placeholder="Search receipts">
+        <select id="filter-category"></select>
+        <input id="filter-from" type="date" aria-label="From date">
+        <input id="filter-to" type="date" aria-label="To date">
+      </section>
 
       <div class="dashboard-grid">
         <section class="panel claim-panel">
@@ -76,6 +86,28 @@
         </aside>
       </div>
 
+      <section class="insight-grid">
+        <article class="panel mini-panel">
+          <div class="panel-title-row">
+            <h2>Claim limits</h2>
+          </div>
+          <div class="limit-list" id="limit-list"></div>
+        </article>
+        <article class="panel mini-panel">
+          <div class="panel-title-row">
+            <h2>Monthly summary</h2>
+          </div>
+          <div class="month-list" id="month-list"></div>
+        </article>
+        <article class="panel mini-panel">
+          <div class="panel-title-row">
+            <h2>Review queue</h2>
+            <span id="review-count">0</span>
+          </div>
+          <div class="review-list" id="review-list"></div>
+        </article>
+      </section>
+
       <section class="panel ai-panel">
         <div class="panel-title-row">
           <div>
@@ -85,6 +117,11 @@
           <span class="cache-chip" id="cache-chip">Ready</span>
         </div>
         <p class="ai-overview" id="ai-overview">Upload receipts to build a timeline.</p>
+        <div class="quick-prompts" id="quick-prompts">
+          <button class="btn btn-outline btn-sm" type="button" data-prompt="What can I still claim?">Claim space</button>
+          <button class="btn btn-outline btn-sm" type="button" data-prompt="Which receipts need review?">Needs review</button>
+          <button class="btn btn-outline btn-sm" type="button" data-prompt="Which category is near the limit?">Near limits</button>
+        </div>
         <div class="timeline" id="ai-timeline"></div>
       </section>
 
@@ -132,6 +169,11 @@
     </div>
   </section>
 
+  <div class="image-modal" id="image-modal" aria-hidden="true">
+    <button class="icon-btn" id="image-modal-close" type="button" aria-label="Close image preview">×</button>
+    <img id="image-modal-img" alt="">
+  </div>
+
   <div class="toast" id="save-toast" role="status" aria-live="polite"></div>
 
   <script>
@@ -154,6 +196,8 @@
       pendingId: 1,
       savingReceiptIds: [],
       savingAllPending: false,
+      extractingReceiptIds: [],
+      filters: { query: '', category: '', from: '', to: '' },
       authToken: localStorage.getItem('receiptManagerToken') || '',
       accountName: localStorage.getItem('receiptManagerAccount') || '',
       authMode: 'login',
@@ -172,6 +216,10 @@
     const uploadSection = document.getElementById('upload-section');
     const btnOpenUpload = document.getElementById('btn-open-upload');
     const btnBackDashboard = document.getElementById('btn-back-dashboard');
+    const receiptSearch = document.getElementById('receipt-search');
+    const filterCategory = document.getElementById('filter-category');
+    const filterFrom = document.getElementById('filter-from');
+    const filterTo = document.getElementById('filter-to');
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
     const pendingList = document.getElementById('pending-list');
@@ -181,10 +229,15 @@
     const categoryLegend = document.getElementById('category-legend');
     const historyList = document.getElementById('history-list');
     const receiptCount = document.getElementById('receipt-count');
+    const limitList = document.getElementById('limit-list');
+    const monthList = document.getElementById('month-list');
+    const reviewList = document.getElementById('review-list');
+    const reviewCount = document.getElementById('review-count');
     const aiHeadline = document.getElementById('ai-headline');
     const aiOverview = document.getElementById('ai-overview');
     const aiTimeline = document.getElementById('ai-timeline');
     const cacheChip = document.getElementById('cache-chip');
+    const btnExportCsv = document.getElementById('btn-export-csv');
     const btnGeneratePdf = document.getElementById('btn-generate-pdf');
     const pdfStatus = document.getElementById('pdf-status');
     const saveToast = document.getElementById('save-toast');
@@ -194,6 +247,10 @@
     const advisorForm = document.getElementById('advisor-form');
     const advisorInput = document.getElementById('advisor-input');
     const advisorMessages = document.getElementById('advisor-messages');
+    const quickPrompts = document.getElementById('quick-prompts');
+    const imageModal = document.getElementById('image-modal');
+    const imageModalImg = document.getElementById('image-modal-img');
+    const imageModalClose = document.getElementById('image-modal-close');
     let toastTimer = null;
 
     function fmt(n) {
@@ -282,6 +339,7 @@
         categoryKey: r.category_key,
         amount: Number(r.amount),
         confirmed: true,
+        needsReview: false,
       }));
       renderAll();
       loadAiSummary();
@@ -294,11 +352,28 @@
 
     function renderDashboard() {
       const confirmed = state.receipts.filter(r => r.confirmed);
+      const visible = filterReceipts(confirmed);
       const claims = calculateClaimTotals(confirmed);
       totalClaimedEl.textContent = fmt(claims.total);
-      receiptCount.textContent = String(confirmed.length);
+      receiptCount.textContent = `${visible.length}/${confirmed.length}`;
       renderDonut(claims.categories, claims.total);
-      renderHistory(confirmed);
+      renderHistory(visible);
+      renderLimitTracker(claims.categories);
+      renderMonthlySummary(confirmed);
+      renderReviewQueue();
+    }
+
+    function filterReceipts(receipts) {
+      const q = state.filters.query.toLowerCase();
+      return receipts.filter(r => {
+        const cat = getCategoryByKey(r.categoryKey);
+        const haystack = `${r.title} ${r.filename} ${cat ? cat.label : ''}`.toLowerCase();
+        if (q && !haystack.includes(q)) return false;
+        if (state.filters.category && r.categoryKey !== state.filters.category) return false;
+        if (state.filters.from && r.receiptDate < state.filters.from) return false;
+        if (state.filters.to && r.receiptDate > state.filters.to) return false;
+        return true;
+      });
     }
 
     function calculateClaimTotals(receipts) {
@@ -318,6 +393,74 @@
       }
 
       return { total, categories };
+    }
+
+    function renderLimitTracker(categories) {
+      if (!categories.length) {
+        limitList.innerHTML = '<p class="empty">No claim limits yet.</p>';
+        return;
+      }
+      limitList.innerHTML = categories.map(cat => {
+        const pct = cat.limit === Infinity ? 0 : Math.min(100, (cat.amount / cat.limit) * 100);
+        const status = cat.limit === Infinity ? 'No fixed limit' : `${fmt(Math.max(0, cat.limit - cat.amount))} left`;
+        return `
+          <div class="limit-item">
+            <div><strong>${escapeHtml(cat.label)}</strong><span>${status}</span></div>
+            <div class="meter"><span style="width:${pct}%;background:${cat.color}"></span></div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderMonthlySummary(receipts) {
+      const months = new Map();
+      for (const r of receipts) {
+        const key = (r.receiptDate || '').slice(0, 7) || 'Undated';
+        months.set(key, (months.get(key) || 0) + Number(r.amount || 0));
+      }
+      const rows = [...months.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6);
+      monthList.innerHTML = rows.length ? rows.map(([month, amount]) => `
+        <div class="stat-row"><span>${escapeHtml(month)}</span><strong>${fmt(amount)}</strong></div>
+      `).join('') : '<p class="empty">No monthly totals yet.</p>';
+    }
+
+    function receiptFingerprint(r) {
+      return [
+        (r.title || '').trim().toLowerCase(),
+        r.receiptDate || '',
+        Number(r.amount || 0).toFixed(2),
+        r.categoryKey || '',
+      ].join('|');
+    }
+
+    function duplicateGroups(receipts = state.receipts.filter(r => r.confirmed)) {
+      const groups = new Map();
+      for (const r of receipts) {
+        const key = receiptFingerprint(r);
+        if (!key.includes('|')) continue;
+        groups.set(key, [...(groups.get(key) || []), r]);
+      }
+      return [...groups.values()].filter(group => group.length > 1);
+    }
+
+    function isLikelyDuplicate(receipt) {
+      if (!receipt.amount || !receipt.categoryKey || !receipt.receiptDate) return false;
+      return state.receipts.some(r =>
+        r !== receipt &&
+        r.confirmed &&
+        Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) &&
+        r.receiptDate === receipt.receiptDate &&
+        r.categoryKey === receipt.categoryKey
+      );
+    }
+
+    function renderReviewQueue() {
+      const pendingReview = state.receipts.filter(r => !r.confirmed && (r.needsReview || !r.amount || !r.categoryKey));
+      const duplicates = duplicateGroups();
+      reviewCount.textContent = String(pendingReview.length + duplicates.length);
+      const reviewRows = pendingReview.map(r => `<div class="stat-row"><span>${escapeHtml(r.filename || r.title || 'Receipt')}</span><strong>Check fields</strong></div>`);
+      const duplicateRows = duplicates.map(group => `<div class="stat-row"><span>${escapeHtml(group[0].title || 'Receipt')}</span><strong>${group.length} duplicates</strong></div>`);
+      reviewList.innerHTML = [...reviewRows, ...duplicateRows].join('') || '<p class="empty">Nothing needs review.</p>';
     }
 
     function renderDonut(categories, total) {
@@ -356,7 +499,7 @@
         const cat = getCategoryByKey(r.categoryKey);
         return `
           <article class="history-item">
-            ${r.imageDataUrl ? `<img src="${r.imageDataUrl}" alt="">` : '<div class="thumb-fallback"></div>'}
+            ${r.imageDataUrl ? `<img src="${r.imageDataUrl}" alt="" data-preview-id="${r.id}">` : '<div class="thumb-fallback"></div>'}
             <div>
               <h3>${escapeHtml(r.title)}</h3>
               <p>${escapeHtml(cat ? cat.label : 'Uncategorized')} · ${escapeHtml(r.receiptDate)}</p>
@@ -370,6 +513,38 @@
       historyList.querySelectorAll('[data-delete-id]').forEach(button => {
         button.addEventListener('click', () => deleteReceipt(Number(button.dataset.deleteId)));
       });
+      historyList.querySelectorAll('[data-preview-id]').forEach(img => {
+        img.addEventListener('click', () => openImagePreview(img.src));
+      });
+    }
+
+    function openImagePreview(src) {
+      imageModalImg.src = src;
+      imageModal.classList.add('open');
+      imageModal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeImagePreview() {
+      imageModal.classList.remove('open');
+      imageModal.setAttribute('aria-hidden', 'true');
+      imageModalImg.src = '';
+    }
+
+    function exportCsv() {
+      const rows = [['Title', 'Date', 'Category', 'Amount', 'Filename']];
+      for (const r of filterReceipts(state.receipts.filter(item => item.confirmed))) {
+        const cat = getCategoryByKey(r.categoryKey);
+        rows.push([r.title, r.receiptDate, cat ? cat.label : '', Number(r.amount || 0).toFixed(2), r.filename]);
+      }
+      const csv = rows.map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'receipts.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
 
     async function loadAiSummary() {
@@ -412,7 +587,7 @@
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ message }),
       });
-      const data = await resp.json();
+      const data = await readJson(resp);
       if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
       return data.reply || 'I could not generate a reply.';
     }
@@ -427,6 +602,16 @@
       }
     }
 
+    function populateFilterSelect() {
+      filterCategory.innerHTML = '<option value="">All categories</option>';
+      for (const cat of TAX_RELIEF_CATEGORIES) {
+        const opt = document.createElement('option');
+        opt.value = cat.key;
+        opt.textContent = cat.label;
+        filterCategory.appendChild(opt);
+      }
+    }
+
     function renderPending() {
       const pending = state.receipts.filter(r => !r.confirmed);
       if (!pending.length) {
@@ -437,11 +622,16 @@
 
       pendingList.innerHTML = '';
       for (const r of pending) {
+        const isExtracting = state.extractingReceiptIds.includes(r.id);
+        const duplicate = isLikelyDuplicate(r);
         const card = document.createElement('article');
-        card.className = 'receipt-card';
+        card.className = `receipt-card${r.needsReview || duplicate ? ' has-warning' : ''}`;
         card.innerHTML = `
           <img class="receipt-thumb" src="${r.imageDataUrl}" alt="">
           <div class="receipt-fields">
+            ${isExtracting ? '<p class="receipt-note">Reading receipt...</p>' : ''}
+            ${duplicate ? '<p class="receipt-note warning">Possible duplicate receipt.</p>' : ''}
+            ${r.needsReview ? '<p class="receipt-note warning">Review suggested before saving.</p>' : ''}
             <div class="field-grid">
               <div class="field">
                 <label for="title-${r.id}">Title</label>
@@ -629,6 +819,33 @@
       renderPending();
     }
 
+    async function extractPendingReceipt(id) {
+      const r = state.receipts.find(item => item.id === id && !item.confirmed);
+      if (!r || !r.imageDataUrl) return;
+      state.extractingReceiptIds = [...state.extractingReceiptIds, id];
+      renderPending();
+      try {
+        const resp = await fetch('/receipts/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ imageDataUrl: r.imageDataUrl }),
+        });
+        const data = await readJson(resp);
+        if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+        r.title = data.title || r.title;
+        r.receiptDate = data.receiptDate || r.receiptDate;
+        r.amount = Number(data.amount || r.amount || 0);
+        r.categoryKey = data.categoryKey || r.categoryKey;
+        r.needsReview = Boolean(data.needsReview || !r.amount || !r.categoryKey || (data.confidence || 0) < 0.7);
+      } catch (err) {
+        r.needsReview = true;
+      } finally {
+        state.extractingReceiptIds = state.extractingReceiptIds.filter(value => value !== id);
+        renderPending();
+        renderDashboard();
+      }
+    }
+
     async function deleteReceipt(id) {
       try {
         const resp = await fetch(`/receipts/${id}`, { method: 'DELETE', headers: authHeaders() });
@@ -648,7 +865,7 @@
         if (!file.type.startsWith('image/')) continue;
         const reader = new FileReader();
         reader.onload = e => {
-          state.receipts.push({
+          const pending = {
             id: state.pendingId++ * -1,
             title: '',
             receiptDate: '',
@@ -657,9 +874,12 @@
             categoryKey: '',
             amount: 0,
             confirmed: false,
-          });
+            needsReview: true,
+          };
+          state.receipts.push(pending);
           renderPending();
           showUpload();
+          extractPendingReceipt(pending.id);
         };
         reader.readAsDataURL(file);
       }
@@ -687,6 +907,11 @@
     btnLogout.addEventListener('click', clearAuthenticated);
     btnOpenUpload.addEventListener('click', showUpload);
     btnBackDashboard.addEventListener('click', showDashboard);
+    btnExportCsv.addEventListener('click', exportCsv);
+    receiptSearch.addEventListener('input', () => { state.filters.query = receiptSearch.value; renderDashboard(); });
+    filterCategory.addEventListener('change', () => { state.filters.category = filterCategory.value; renderDashboard(); });
+    filterFrom.addEventListener('change', () => { state.filters.from = filterFrom.value; renderDashboard(); });
+    filterTo.addEventListener('change', () => { state.filters.to = filterTo.value; renderDashboard(); });
     dropzone.addEventListener('click', () => fileInput.click());
     dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
@@ -698,6 +923,17 @@
     fileInput.addEventListener('change', () => { handleFiles(fileInput.files); fileInput.value = ''; });
     advisorBubble.addEventListener('click', () => advisorBox.classList.toggle('open'));
     advisorClose.addEventListener('click', () => advisorBox.classList.remove('open'));
+    quickPrompts.addEventListener('click', e => {
+      const button = e.target.closest('[data-prompt]');
+      if (!button) return;
+      advisorBox.classList.add('open');
+      advisorInput.value = button.dataset.prompt;
+      advisorForm.requestSubmit();
+    });
+    imageModalClose.addEventListener('click', closeImagePreview);
+    imageModal.addEventListener('click', e => {
+      if (e.target === imageModal) closeImagePreview();
+    });
     advisorForm.addEventListener('submit', async e => {
       e.preventDefault();
       const text = advisorInput.value.trim();
@@ -788,6 +1024,7 @@
     }
 
     setAuthMode('login');
+    populateFilterSelect();
     showDashboard();
     restoreSession();
   </script>
