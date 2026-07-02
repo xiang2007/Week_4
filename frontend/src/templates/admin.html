@@ -11,37 +11,53 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --paper: #F5F2E8;
-      --paper-dim: #EDE8D9;
-      --line: #D9D2BC;
-      --ink: #1A1A1F;
-      --ink-soft: #5C5748;
-      --ink-faint: #8A8571;
-      --stamp: #C4432B;
-      --stamp-dark: #9E3220;
-      --mint: #2F7A5C;
+      --bg: #F6F8FB;
+      --surface: #FFFFFF;
+      --surface-soft: #F1F5F9;
+      --surface-strong: #E8EEF6;
+      --line: #D7DEE9;
+      --line-strong: #BAC6D6;
+      --ink: #142033;
+      --ink-soft: #526070;
+      --ink-faint: #8390A1;
+      --brand: #156F67;
+      --brand-dark: #0E5550;
+      --brand-soft: #DFF3EF;
+      --danger: #C2413A;
+      --danger-soft: #FDECEA;
+      --success: #207A4D;
+      --success-soft: #E6F5ED;
       --card: #FFFFFF;
       --font-display: 'Space Grotesk', sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
       --font-body: 'Inter', sans-serif;
+      --shadow-sm: 0 1px 2px rgba(20, 32, 51, 0.06), 0 8px 24px rgba(20, 32, 51, 0.05);
+      --shadow-md: 0 24px 60px rgba(20, 32, 51, 0.12);
+      --radius: 8px;
     }
 
     body {
       min-height: 100vh;
       font-family: var(--font-body);
-      background: var(--paper);
+      background:
+        linear-gradient(180deg, #FFFFFF 0, var(--bg) 260px),
+        var(--bg);
       color: var(--ink);
-      background-image: radial-gradient(circle at 1px 1px, rgba(26,26,31,0.05) 1px, transparent 0);
-      background-size: 22px 22px;
     }
 
     .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1.1rem 1.5rem;
-      background: rgba(245,242,232,0.92);
-      border-bottom: 1.5px dashed var(--line);
+      gap: 1rem;
+      min-height: 72px;
+      padding: 0.9rem clamp(1rem, 3vw, 2rem);
+      background: rgba(255,255,255,0.88);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(16px);
     }
 
     .brand {
@@ -55,31 +71,31 @@
     }
 
     .mark {
-      width: 28px;
-      height: 28px;
+      width: 34px;
+      height: 34px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      background: var(--ink);
-      color: var(--paper);
-      border-radius: 4px;
+      background: var(--brand);
+      color: #fff;
+      border-radius: var(--radius);
       font-family: var(--font-mono);
       font-size: 0.78rem;
-      transform: rotate(-4deg);
+      box-shadow: inset 0 -10px 18px rgba(0,0,0,0.08);
     }
 
     .wrap {
       width: 100%;
-      max-width: 980px;
+      max-width: 1120px;
       margin: 0 auto;
       padding: 2.5rem 1.5rem;
     }
 
     .panel {
       background: var(--card);
-      border: 1.5px solid var(--line);
-      border-radius: 1rem;
-      box-shadow: 0 24px 48px -18px rgba(26,26,31,0.24);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
       padding: 2rem;
     }
 
@@ -93,6 +109,7 @@
       font-size: 1.9rem;
       line-height: 1.15;
       margin-bottom: 0.45rem;
+      letter-spacing: 0;
     }
 
     .subtitle {
@@ -119,8 +136,8 @@
     input {
       width: 100%;
       padding: 0.78rem 0.9rem;
-      border: 1.5px solid var(--line);
-      border-radius: 0.6rem;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
       background: #fff;
       color: var(--ink);
       font: inherit;
@@ -128,29 +145,49 @@
 
     input:focus {
       outline: none;
-      border-color: var(--stamp);
-      box-shadow: 0 0 0 3px rgba(196, 67, 43, 0.12);
+      border-color: var(--brand);
+      box-shadow: 0 0 0 4px rgba(21, 111, 103, 0.12);
     }
 
     .btn {
-      border: 0;
-      border-radius: 0.6rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
       padding: 0.78rem 1.25rem;
       font: inherit;
       font-weight: 700;
       cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
     }
 
     .btn-primary {
-      background: var(--ink);
-      color: var(--paper);
-      box-shadow: 3px 3px 0 var(--stamp);
+      background: var(--brand);
+      color: #fff;
+      box-shadow: 0 10px 22px rgba(21, 111, 103, 0.18);
+    }
+
+    .btn-primary:hover {
+      background: var(--brand-dark);
     }
 
     .btn-outline {
-      background: transparent;
+      background: var(--surface);
       color: var(--ink);
-      border: 1.5px solid var(--ink);
+      border-color: var(--line-strong);
+      box-shadow: 0 1px 1px rgba(20, 32, 51, 0.03);
+    }
+
+    .btn-outline:hover {
+      border-color: var(--brand);
+      color: var(--brand-dark);
     }
 
     .btn:disabled {
@@ -163,10 +200,10 @@
       display: none;
       margin: 0.25rem 0 1rem;
       padding: 0.75rem 0.85rem;
-      background: #FBEAE6;
-      color: var(--stamp-dark);
-      border: 1.5px solid #F0C4B8;
-      border-radius: 0.6rem;
+      background: var(--danger-soft);
+      color: var(--danger);
+      border: 1px solid #F2BAB5;
+      border-radius: var(--radius);
       font-size: 0.9rem;
     }
 
@@ -198,9 +235,9 @@
 
     .insight-card {
       padding: 1rem;
-      background: var(--paper-dim);
-      border: 1.5px solid var(--line);
-      border-radius: 0.85rem;
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
     }
 
     .insight-card span {
@@ -226,17 +263,18 @@
 
     .table-wrap {
       overflow-x: auto;
-      border: 1.5px solid var(--line);
-      border-radius: 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
     }
 
     .reset-panel {
       display: none;
       margin-bottom: 1.25rem;
       padding: 1rem;
-      background: var(--paper-dim);
-      border: 1.5px solid var(--line);
-      border-radius: 0.85rem;
+      background: var(--surface-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
     }
 
     .reset-panel.active {
@@ -260,9 +298,9 @@
 
     .status.success {
       display: block;
-      background: #EAF4EE;
-      color: #24614A;
-      border: 1.5px solid #BFE3CD;
+      background: var(--success-soft);
+      color: var(--success);
+      border: 1px solid #BBDDCB;
     }
 
     table {
@@ -280,12 +318,11 @@
     }
 
     th {
-      background: var(--paper-dim);
+      background: var(--surface-soft);
       font-family: var(--font-mono);
       font-size: 0.76rem;
       color: var(--ink-soft);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
     }
 
     tr:last-child td { border-bottom: 0; }

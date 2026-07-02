@@ -805,7 +805,7 @@ def create_backend() -> FastAPI:
                 summary["updated_at"] = cached["updated_at"]
                 return summary
 
-            summary = generate_gemini_summary(rows)
+            summary = fallback_ai_summary(rows)
             conn.execute(
                 """
                 INSERT INTO ai_summaries (id, summary_json, receipt_count, receipt_signature, updated_at)
