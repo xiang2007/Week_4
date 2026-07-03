@@ -6,6 +6,7 @@ import re
 import secrets
 import sqlite3
 import urllib.error
+import urllib.parse
 import urllib.request
 from hashlib import sha256
 from pathlib import Path
@@ -31,6 +32,11 @@ if OCR_PROVIDER not in {"manual", "gemini", "paddle"}:
     OCR_PROVIDER = "gemini"
 MAX_RECEIPT_AMOUNT = float(os.getenv("MAX_RECEIPT_AMOUNT", "100000"))
 MIN_RECEIPT_AMOUNT = 0.01
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "receipt-images").strip()
+SUPABASE_SIGNED_URL_SECONDS = int(os.getenv("SUPABASE_SIGNED_URL_SECONDS", "3600"))
+SUPABASE_STORAGE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET)
 
 
 def hash_password(password: str) -> str:
@@ -40,6 +46,10 @@ def hash_password(password: str) -> str:
 def user_db_path(account_name: str) -> Path:
     digest = sha256(account_name.encode("utf-8")).hexdigest()
     return DATA_DIR / f"user_{digest}.db"
+
+
+def user_storage_prefix(account_name: str) -> str:
+    return sha256(account_name.encode("utf-8")).hexdigest()
 
 
 def init_user_db(account_name: str) -> None:
@@ -55,6 +65,7 @@ def init_user_db(account_name: str) -> None:
                 receipt_date TEXT,
                 filename TEXT,
                 image_data_url TEXT,
+                image_storage_path TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -67,6 +78,8 @@ def init_user_db(account_name: str) -> None:
             conn.execute("ALTER TABLE receipts ADD COLUMN title TEXT")
         if "receipt_date" not in columns:
             conn.execute("ALTER TABLE receipts ADD COLUMN receipt_date TEXT")
+        if "image_storage_path" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN image_storage_path TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ai_summaries (
@@ -267,6 +280,121 @@ def normalize_optional_text(value: Optional[str]) -> Optional[str]:
     return stripped or None
 
 
+def parse_image_data_url(image_data_url: Optional[str]) -> Optional[tuple[str, bytes, str]]:
+    if not image_data_url:
+        return None
+
+    match = re.fullmatch(r"data:(image/(?:png|jpeg|jpg|webp));base64,(.+)", image_data_url)
+    if not match:
+        return None
+
+    import base64
+
+    try:
+        image_bytes = base64.b64decode(match.group(2), validate=True)
+    except ValueError:
+        return None
+
+    content_type = match.group(1).replace("jpg", "jpeg")
+    extension = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/webp": "webp",
+    }[content_type]
+    return content_type, image_bytes, extension
+
+
+def supabase_headers(content_type: Optional[str] = None) -> dict[str, str]:
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
+def quote_storage_path(path: str) -> str:
+    return urllib.parse.quote(path.strip("/"), safe="/")
+
+
+def upload_receipt_image(account_name: str, image_data_url: Optional[str]) -> Optional[str]:
+    parsed = parse_image_data_url(image_data_url)
+    if not SUPABASE_STORAGE_ENABLED or not parsed:
+        return None
+
+    content_type, image_bytes, extension = parsed
+    storage_path = f"receipts/{user_storage_prefix(account_name)}/{secrets.token_urlsafe(16)}.{extension}"
+    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}/{quote_storage_path(storage_path)}"
+    req = urllib.request.Request(
+        url,
+        data=image_bytes,
+        headers={
+            **supabase_headers(content_type),
+            "Cache-Control": "3600",
+            "x-upsert": "false",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.status >= 400:
+                raise HTTPException(status_code=502, detail="Receipt image upload failed")
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=502, detail="Receipt image upload failed") from exc
+
+    return storage_path
+
+
+def signed_receipt_image_url(storage_path: Optional[str]) -> Optional[str]:
+    if not SUPABASE_STORAGE_ENABLED or not storage_path:
+        return None
+
+    url = f"{SUPABASE_URL}/storage/v1/object/sign/{SUPABASE_STORAGE_BUCKET}/{quote_storage_path(storage_path)}"
+    body = json.dumps({"expiresIn": SUPABASE_SIGNED_URL_SECONDS}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers=supabase_headers("application/json"),
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return None
+
+    signed_url = data.get("signedURL") or data.get("signedUrl")
+    if not signed_url:
+        return None
+    if signed_url.startswith("http://") or signed_url.startswith("https://"):
+        return signed_url
+    if signed_url.startswith("/storage/v1/"):
+        return f"{SUPABASE_URL}{signed_url}"
+    return f"{SUPABASE_URL}/storage/v1{signed_url}"
+
+
+def delete_receipt_image(storage_path: Optional[str]) -> None:
+    if not SUPABASE_STORAGE_ENABLED or not storage_path:
+        return
+
+    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}"
+    body = json.dumps({"prefixes": [storage_path]}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers=supabase_headers("application/json"),
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=12):
+            return
+    except (urllib.error.URLError, TimeoutError):
+        return
+
+
 def receipt_signature(receipts: list[sqlite3.Row]) -> str:
     payload = [
         {
@@ -362,25 +490,105 @@ def generate_gemini_summary(receipts: list[sqlite3.Row]) -> dict:
         return fallback
 
 
-def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
-    if not GEMINI_API_KEY:
-        return "Gemini API key is not set. Add GEMINI_API_KEY to .env and restart the app."
+def receipt_to_advisor_item(row: sqlite3.Row) -> dict:
+    return {
+        "title": row["title"] or f"Receipt {row['id']}",
+        "date": row["receipt_date"] or row["created_at"][:10],
+        "amount": round(float(row["amount"] or 0), 2),
+        "category": TAX_RELIEF_CATEGORIES[row["category_key"]]["label"],
+    }
 
-    compact_receipts = [
-        {
-            "title": row["title"] or f"Receipt {row['id']}",
-            "date": row["receipt_date"] or row["created_at"][:10],
-            "amount": row["amount"],
-            "category": TAX_RELIEF_CATEGORIES[row["category_key"]]["label"],
-        }
-        for row in receipts
+
+def build_advisor_context(message: str, receipts: list[sqlite3.Row]) -> dict:
+    valid_receipts = [
+        row for row in receipts
+        if MIN_RECEIPT_AMOUNT <= float(row["amount"] or 0) <= MAX_RECEIPT_AMOUNT
+        and row["category_key"] in TAX_RELIEF_CATEGORIES
     ]
+    summary = calculate_summary([
+        ReceiptItem(categoryKey=row["category_key"], amount=float(row["amount"] or 0))
+        for row in valid_receipts
+    ])
+    category_totals = [
+        {
+            "category": item["category_label"],
+            "spent": round(float(item["amount"] or 0), 2),
+            "claimable": round(float(item["claimable_amount"] or 0), 2),
+            "remaining": None if item["remaining"] is None else round(float(item["remaining"]), 2),
+        }
+        for item in summary["categories"]
+    ]
+    category_totals.sort(key=lambda item: item["claimable"], reverse=True)
+
+    query_terms = {
+        term for term in re.findall(r"[A-Za-z0-9]+", message.lower())
+        if len(term) >= 3
+    }
+    matched_receipts = []
+    for row in valid_receipts:
+        category_label = TAX_RELIEF_CATEGORIES[row["category_key"]]["label"]
+        haystack = f"{row['title'] or ''} {category_label} {row['receipt_date'] or ''}".lower()
+        if any(term in haystack for term in query_terms):
+            matched_receipts.append(row)
+
+    recent_receipts = sorted(
+        valid_receipts,
+        key=lambda row: (row["receipt_date"] or row["created_at"][:10], row["id"]),
+        reverse=True,
+    )[:5]
+
+    return {
+        "receipt_count": len(valid_receipts),
+        "total_spent": round(sum(float(row["amount"] or 0) for row in valid_receipts), 2),
+        "total_claimable": round(float(summary["total_claimed"] or 0), 2),
+        "category_totals": category_totals[:8],
+        "matching_receipts": [receipt_to_advisor_item(row) for row in matched_receipts[:5]],
+        "recent_receipts": [receipt_to_advisor_item(row) for row in recent_receipts],
+    }
+
+
+def fallback_advisor_reply(message: str, context: dict) -> str:
+    if context["receipt_count"] == 0:
+        return "No saved receipts yet. Upload and save a receipt first, then I can help review claims, limits, and categories."
+
+    lowered = message.lower()
+    if any(word in lowered for word in ("total", "claim", "claimed", "summary")):
+        top_categories = ", ".join(
+            f"{item['category']} RM {item['claimable']:.2f}"
+            for item in context["category_totals"][:3]
+        )
+        return (
+            f"You have {context['receipt_count']} saved receipts with RM {context['total_claimable']:.2f} "
+            f"currently claimable. Top categories: {top_categories or 'none yet'}."
+        )
+
+    if "recent" in lowered or "latest" in lowered:
+        latest = context["recent_receipts"][:3]
+        if not latest:
+            return "No recent saved receipts are available yet."
+        return "Recent receipts: " + "; ".join(
+            f"{item['date']} {item['title']} RM {item['amount']:.2f}"
+            for item in latest
+        )
+
+    return (
+        f"You have {context['receipt_count']} saved receipts and RM {context['total_claimable']:.2f} "
+        "currently claimable. Ask about a category, recent receipts, or total claims for a more specific answer."
+    )
+
+
+def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
+    context = build_advisor_context(message, receipts)
+    if not GEMINI_API_KEY:
+        return fallback_advisor_reply(message, context)
+
     prompt = (
         "You are a concise personal finance assistant for tax receipt planning. "
-        "Use only the user's receipt records below. Do not provide legal, investment, or tax filing advice. "
+        "Use only the compact database context below. Do not assume access to receipts not shown. "
+        "Do not provide legal, investment, or tax filing advice. "
         "Keep the answer under 70 words and give practical next steps. "
         "Return plain text only. Do not use Markdown, bold markers, bullets, numbered lists, or headings.\n"
-        f"Receipts: {json.dumps(compact_receipts, ensure_ascii=True)}\n"
+        f"Database context: {json.dumps(context, ensure_ascii=True)}\n"
         f"User question: {message}"
     )
     body = json.dumps({
@@ -654,7 +862,7 @@ def create_backend() -> FastAPI:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
-                SELECT id, receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, created_at
+                SELECT id, receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, image_storage_path, created_at
                 FROM receipts
                 ORDER BY id
                 """
@@ -670,7 +878,8 @@ def create_backend() -> FastAPI:
                     "title": row["title"],
                     "receipt_date": row["receipt_date"],
                     "filename": row["filename"],
-                    "image_data_url": row["image_data_url"],
+                    "image_data_url": signed_receipt_image_url(row["image_storage_path"]) or row["image_data_url"],
+                    "image_storage_path": row["image_storage_path"],
                     "created_at": row["created_at"],
                 }
                 for row in rows
@@ -701,6 +910,9 @@ def create_backend() -> FastAPI:
         if payload.categoryKey not in TAX_RELIEF_CATEGORIES:
             raise HTTPException(status_code=400, detail="Unknown category")
 
+        image_storage_path = upload_receipt_image(account_name, payload.imageDataUrl)
+        image_data_url = None if image_storage_path else payload.imageDataUrl
+
         init_user_db(account_name)
         with sqlite3.connect(user_db_path(account_name)) as conn:
             category_count = conn.execute(
@@ -712,8 +924,8 @@ def create_backend() -> FastAPI:
             receipt_date = normalize_optional_text(payload.receiptDate) or date.today().isoformat()
             cursor = conn.execute(
                 """
-                INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, image_storage_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload.receiptNumber,
@@ -722,7 +934,8 @@ def create_backend() -> FastAPI:
                     title,
                     receipt_date,
                     payload.filename,
-                    payload.imageDataUrl,
+                    image_data_url,
+                    image_storage_path,
                 ),
             )
             clear_ai_summary_cache(conn)
@@ -757,10 +970,12 @@ def create_backend() -> FastAPI:
                 category_label = TAX_RELIEF_CATEGORIES[receipt.categoryKey]["label"]
                 title = normalize_optional_text(receipt.title) or f"Receipt {category_label} {counts[receipt.categoryKey]}"
                 receipt_date = normalize_optional_text(receipt.receiptDate) or date.today().isoformat()
+                image_storage_path = upload_receipt_image(account_name, receipt.imageDataUrl)
+                image_data_url = None if image_storage_path else receipt.imageDataUrl
                 cursor = conn.execute(
                     """
-                    INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, image_storage_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         receipt.receiptNumber,
@@ -769,7 +984,8 @@ def create_backend() -> FastAPI:
                         title,
                         receipt_date,
                         receipt.filename,
-                        receipt.imageDataUrl,
+                        image_data_url,
+                        image_storage_path,
                     ),
                 )
                 saved.append({"id": cursor.lastrowid, "title": title, "receipt_date": receipt_date})
@@ -794,6 +1010,11 @@ def create_backend() -> FastAPI:
         init_user_db(account_name)
 
         with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT image_storage_path FROM receipts WHERE id = ?",
+                (receipt_id,),
+            ).fetchone()
             cursor = conn.execute(
                 "DELETE FROM receipts WHERE id = ?",
                 (receipt_id,),
@@ -804,6 +1025,7 @@ def create_backend() -> FastAPI:
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Receipt not found")
 
+        delete_receipt_image(row["image_storage_path"] if row else None)
         return {"deleted": True}
     
     @app.post("/tax-summary") #added

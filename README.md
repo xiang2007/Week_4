@@ -27,7 +27,7 @@ The project is split into two services:
 | Backend API | FastAPI |
 | Frontend server | FastAPI + Jinja templates |
 | App UI | React via CDN, Lucide icons, custom CSS |
-| Storage | SQLite files under `backend/data/` |
+| Storage | SQLite files under `backend/data/`, optional Supabase Storage for receipt images |
 | OCR / AI | Gemini API, optional manual mode |
 | PDF export | img2pdf |
 | Runtime | Python 3.14, uv |
@@ -73,6 +73,10 @@ GEMINI_MODEL=gemini-1.5-flash
 ADMIN_ACCOUNT_NAME=admin
 ADMIN_PASSWORD=admin
 MAX_RECEIPT_AMOUNT=100000
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_STORAGE_BUCKET=receipt-images
+SUPABASE_SIGNED_URL_SECONDS=3600
 ```
 
 `OCR_PROVIDER` can be:
@@ -82,6 +86,22 @@ MAX_RECEIPT_AMOUNT=100000
 - `paddle`: placeholder/local OCR mode if implemented
 
 For demos, `OCR_PROVIDER=manual` is the safest setting because the app works without an API key.
+
+### Optional Supabase Receipt Image Storage
+
+By default, receipt images are stored in SQLite as data URLs so the app works locally with no cloud setup.
+
+To store new receipt images in Supabase instead:
+
+1. Create a Supabase project.
+2. In Supabase Storage, create a private bucket named `receipt-images`.
+3. Copy your project URL into `SUPABASE_URL`.
+4. Copy your service role key into `SUPABASE_SERVICE_ROLE_KEY`.
+5. Restart the backend.
+
+When Supabase is configured, the backend uploads new receipt images into the private bucket, stores the storage path in SQLite, and returns temporary signed image URLs when receipts are loaded.
+
+Keep `SUPABASE_SERVICE_ROLE_KEY` only on the backend. Do not expose it in frontend code or commit it to git.
 
 ## Run Locally With Docker
 
@@ -161,6 +181,10 @@ On Railway, deploy this as two services from the same GitHub repo:
      ADMIN_ACCOUNT_NAME=admin
      ADMIN_PASSWORD=choose-a-strong-password
      MAX_RECEIPT_AMOUNT=100000
+     SUPABASE_URL=https://your-project-ref.supabase.co
+     SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+     SUPABASE_STORAGE_BUCKET=receipt-images
+     SUPABASE_SIGNED_URL_SECONDS=3600
      ```
 
 2. Frontend service
@@ -178,9 +202,10 @@ Use the frontend public Railway URL as the user-facing app URL.
 ## Important Security Notes
 
 - Do not commit `.env` or real API keys.
+- Do not expose the Supabase service role key in frontend code.
 - If a Gemini API key was exposed, rotate it before deployment.
 - Auth tokens are stored in memory, so users may need to log in again after a backend restart.
-- SQLite files are stored inside the backend container unless a persistent volume is configured.
+- SQLite files are stored inside the backend container unless a persistent volume is configured. Supabase Storage only moves receipt image files; receipt metadata remains in SQLite in this version.
 - For production, use persistent storage and set strong admin credentials in environment variables.
 
 ## API Overview
