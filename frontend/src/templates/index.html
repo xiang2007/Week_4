@@ -908,16 +908,17 @@
       const duplicate = Boolean(receipt.amount && receipt.categoryKey && receipt.receiptDate && confirmed.some(r => Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) && r.receiptDate === receipt.receiptDate && r.categoryKey === receipt.categoryKey));
       const amountInvalid = !receipt.amount || receipt.amount < MIN_RECEIPT_AMOUNT || receipt.amount > MAX_RECEIPT_AMOUNT;
       const categoryInvalid = !receipt.categoryKey;
+      const extractionMessage = typeof receipt.extractionMessage === 'string' ? receipt.extractionMessage.trim() : '';
       return (
         <article className={`receipt-card ${receipt.needsReview || duplicate ? 'has-warning' : ''} ${amountInvalid || categoryInvalid ? 'has-error' : ''}`} data-pending-card={receipt.id}>
           <img className="receipt-thumb" src={receipt.imageDataUrl} alt="" onClick={() => openPreview(receipt.imageDataUrl)} />
           <div className="receipt-fields">
-            {extracting && <p className="receipt-note">Reading receipt...</p>}
-            {receipt.extractionMessage && <p className="receipt-note warning">{receipt.extractionMessage}</p>}
-            {duplicate && <p className="receipt-note warning">Possible duplicate receipt.</p>}
-            {receipt.needsReview && <p className="receipt-note warning">Review suggested before saving.</p>}
+            {extracting ? <p className="receipt-note">Reading receipt...</p> : null}
+            {extractionMessage ? <p className="receipt-note warning">{extractionMessage}</p> : null}
+            {duplicate ? <p className="receipt-note warning">Possible duplicate receipt.</p> : null}
+            {receipt.needsReview ? <p className="receipt-note warning">Review suggested before saving.</p> : null}
             {Number(receipt.amount || 0) > 0 && receipt.amount < MIN_RECEIPT_AMOUNT ? <p className="receipt-note warning">Amount must be at least RM 0.01.</p> : null}
-            {receipt.amount > MAX_RECEIPT_AMOUNT && <p className="receipt-note warning">Amount must be {fmt(MAX_RECEIPT_AMOUNT)} or less.</p>}
+            {receipt.amount > MAX_RECEIPT_AMOUNT ? <p className="receipt-note warning">Amount must be {fmt(MAX_RECEIPT_AMOUNT)} or less.</p> : null}
             <div className="field-grid">
               <div className="field"><label>Title</label><input value={receipt.title || ''} onChange={e => updateReceipt(receipt.id, { title: e.target.value })} placeholder="Optional" /></div>
               <div className="field"><label>Date</label><input value={receipt.receiptDate || ''} onChange={e => updateReceipt(receipt.id, { receiptDate: e.target.value })} type="date" /></div>
