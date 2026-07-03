@@ -89,7 +89,11 @@
 
     function calculateClaimTotals(receipts) {
       const grouped = new Map();
-      receipts.forEach(r => grouped.set(r.categoryKey, (grouped.get(r.categoryKey) || 0) + Number(r.amount || 0)));
+      receipts.forEach(r => {
+        const amount = Number(r.amount || 0);
+        if (amount < MIN_RECEIPT_AMOUNT || amount > MAX_RECEIPT_AMOUNT) return;
+        grouped.set(r.categoryKey, (grouped.get(r.categoryKey) || 0) + amount);
+      });
       const categories = [];
       let total = 0;
       for (const [key, amount] of grouped.entries()) {
@@ -223,6 +227,7 @@
         })));
         loadOcrConfig(authToken);
         loadAiSummary(authToken);
+        loadTaxPlan(authToken);
       }
 
       async function loadOcrConfig(authToken = token) {
@@ -255,15 +260,17 @@
         }
       }
 
-      async function loadTaxPlan() {
+      async function loadTaxPlan(authToken = token) {
         const receiptItems = confirmed.map(r => ({ categoryKey: r.categoryKey, amount: Number(r.amount || 0) }));
         setTaxPlanStatus('Updating');
         try {
-          const resp = await fetch('/tax-summary', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ receipts: receiptItems }),
-          });
+          const resp = authToken
+            ? await fetch('/tax-summary', { method: 'POST', headers: authHeaders(authToken) })
+            : await fetch('/tax-summary', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ receipts: receiptItems }),
+            });
           const data = await readJson(resp);
           if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
           setTaxPlan(data);

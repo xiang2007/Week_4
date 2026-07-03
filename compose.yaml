@@ -8,6 +8,9 @@ services:
       OCR_PROVIDER: ${OCR_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      ADMIN_ACCOUNT_NAME: ${ADMIN_ACCOUNT_NAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      MAX_RECEIPT_AMOUNT: ${MAX_RECEIPT_AMOUNT:-100000}
     ports:
       - "${BACKEND_PORT:?Set BACKEND_PORT}:${BACKEND_PORT:?Set BACKEND_PORT}"
     healthcheck:

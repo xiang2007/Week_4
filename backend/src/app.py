@@ -22,8 +22,8 @@ DATA_DIR = BASE_DIR / "data"
 ACCOUNTS_DB = DATA_DIR / "accounts.db"
 AUTH_TOKENS: dict[str, str] = {}
 ADMIN_TOKENS: set[str] = set()
-ADMIN_ACCOUNT_NAME = "admin"
-ADMIN_PASSWORD = "admin"
+ADMIN_ACCOUNT_NAME = os.getenv("ADMIN_ACCOUNT_NAME", "admin").strip()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 OCR_PROVIDER = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
@@ -139,7 +139,7 @@ def calculate_summary(receipts: list["ReceiptItem"]):
     aggregated = {}
 
     for receipt in receipts:
-        if receipt.amount < MIN_RECEIPT_AMOUNT:
+        if receipt.amount < MIN_RECEIPT_AMOUNT or receipt.amount > MAX_RECEIPT_AMOUNT:
             continue
 
         if receipt.categoryKey not in TAX_RELIEF_CATEGORIES:
