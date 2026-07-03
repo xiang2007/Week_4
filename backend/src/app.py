@@ -25,7 +25,7 @@ ADMIN_TOKENS: set[str] = set()
 ADMIN_ACCOUNT_NAME = "admin"
 ADMIN_PASSWORD = "admin"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 OCR_PROVIDER = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
 if OCR_PROVIDER not in {"manual", "gemini", "paddle"}:
     OCR_PROVIDER = "gemini"

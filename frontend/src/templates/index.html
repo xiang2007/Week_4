@@ -905,7 +905,7 @@
     }
 
     function PendingCard({ receipt, confirmed, extracting, saving, updateReceipt, removePending, confirmReceipt, openPreview }) {
-      const duplicate = receipt.amount && receipt.categoryKey && receipt.receiptDate && confirmed.some(r => Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) && r.receiptDate === receipt.receiptDate && r.categoryKey === receipt.categoryKey);
+      const duplicate = Boolean(receipt.amount && receipt.categoryKey && receipt.receiptDate && confirmed.some(r => Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) && r.receiptDate === receipt.receiptDate && r.categoryKey === receipt.categoryKey));
       const amountInvalid = !receipt.amount || receipt.amount < MIN_RECEIPT_AMOUNT || receipt.amount > MAX_RECEIPT_AMOUNT;
       const categoryInvalid = !receipt.categoryKey;
       return (
@@ -916,7 +916,7 @@
             {receipt.extractionMessage && <p className="receipt-note warning">{receipt.extractionMessage}</p>}
             {duplicate && <p className="receipt-note warning">Possible duplicate receipt.</p>}
             {receipt.needsReview && <p className="receipt-note warning">Review suggested before saving.</p>}
-            {receipt.amount > 0 && receipt.amount < MIN_RECEIPT_AMOUNT && <p className="receipt-note warning">Amount must be at least RM 0.01.</p>}
+            {Number(receipt.amount || 0) > 0 && receipt.amount < MIN_RECEIPT_AMOUNT ? <p className="receipt-note warning">Amount must be at least RM 0.01.</p> : null}
             {receipt.amount > MAX_RECEIPT_AMOUNT && <p className="receipt-note warning">Amount must be {fmt(MAX_RECEIPT_AMOUNT)} or less.</p>}
             <div className="field-grid">
               <div className="field"><label>Title</label><input value={receipt.title || ''} onChange={e => updateReceipt(receipt.id, { title: e.target.value })} placeholder="Optional" /></div>
