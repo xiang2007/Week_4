@@ -15,6 +15,8 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080").rstrip("/")
 BACKEND_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+SESSION_COOKIE_NAME = "receipt_manager_session"
+ADMIN_SESSION_COOKIE_NAME = "receipt_manager_admin_session"
 
 
 def response_data(resp: httpx.Response):
@@ -30,6 +32,21 @@ def response_detail(resp: httpx.Response, fallback: str) -> str:
         return str(data["detail"])
     text = resp.text.strip()
     return text or fallback
+
+
+def session_headers(request: Request, admin: bool = False) -> dict[str, str]:
+    cookie_name = ADMIN_SESSION_COOKIE_NAME if admin else SESSION_COOKIE_NAME
+    session_id = request.cookies.get(cookie_name)
+    if not session_id:
+        return {}
+    return {"Cookie": f"{cookie_name}={session_id}"}
+
+
+def cookie_json_response(resp: httpx.Response) -> JSONResponse:
+    response = JSONResponse(content=response_data(resp))
+    for cookie in resp.headers.get_list("set-cookie"):
+        response.headers.append("set-cookie", cookie)
+    return response
 
 
 def create_app() -> FastAPI:
@@ -91,16 +108,16 @@ async def convert_pdf(files: list[UploadFile] = File(...)):
 @app.post("/tax-summary") #add
 async def tax_summary(request: Request):
     """Read tax relief summary from the logged-in user's backend database."""
-    auth_header = request.headers.get("authorization")
+    headers = session_headers(request)
     data = None
-    if not auth_header:
+    if not headers:
         data = await request.json()
 
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/tax-summary",
             json=data,
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=headers or None,
         )
 
     if resp.status_code != 200:
@@ -118,7 +135,7 @@ async def signup(request: Request):
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Signup failed"))
 
-    return response_data(resp)
+    return cookie_json_response(resp)
 
 
 @app.post("/auth/login")
@@ -130,7 +147,29 @@ async def login(request: Request):
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Login failed"))
 
+    return cookie_json_response(resp)
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.get(f"{BACKEND_URL}/auth/me", headers=session_headers(request) or None)
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Login required"))
+
     return response_data(resp)
+
+
+@app.post("/auth/logout")
+async def logout(request: Request):
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.post(f"{BACKEND_URL}/auth/logout", headers=session_headers(request) or None)
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Logout failed"))
+
+    return cookie_json_response(resp)
 
 
 @app.post("/admin/auth/login")
@@ -142,16 +181,37 @@ async def admin_login(request: Request):
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Admin login failed"))
 
+    return cookie_json_response(resp)
+
+
+@app.get("/admin/auth/me")
+async def admin_auth_me(request: Request):
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.get(f"{BACKEND_URL}/admin/auth/me", headers=session_headers(request, admin=True) or None)
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Admin login required"))
+
     return response_data(resp)
+
+
+@app.post("/admin/auth/logout")
+async def admin_logout(request: Request):
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.post(f"{BACKEND_URL}/admin/auth/logout", headers=session_headers(request, admin=True) or None)
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Admin logout failed"))
+
+    return cookie_json_response(resp)
 
 
 @app.get("/admin/accounts")
 async def admin_accounts(request: Request):
-    auth_header = request.headers.get("authorization")
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/admin/accounts",
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request, admin=True) or None,
         )
 
     if resp.status_code >= 400:
@@ -162,11 +222,10 @@ async def admin_accounts(request: Request):
 
 @app.get("/admin/insights")
 async def admin_insights(request: Request):
-    auth_header = request.headers.get("authorization")
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/admin/insights",
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request, admin=True) or None,
         )
 
     if resp.status_code >= 400:
@@ -177,13 +236,12 @@ async def admin_insights(request: Request):
 
 @app.post("/admin/accounts/reset-password")
 async def admin_reset_password(request: Request):
-    auth_header = request.headers.get("authorization")
     data = await request.json()
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/admin/accounts/reset-password",
             json=data,
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request, admin=True) or None,
         )
 
     if resp.status_code >= 400:
@@ -194,11 +252,10 @@ async def admin_reset_password(request: Request):
 
 @app.get("/receipts")
 async def get_receipts(request: Request):
-    auth_header = request.headers.get("authorization")
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/receipts",
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
         )
 
     if resp.status_code >= 400:
@@ -209,11 +266,10 @@ async def get_receipts(request: Request):
 
 @app.get("/ocr-config")
 async def ocr_config(request: Request):
-    auth_header = request.headers.get("authorization")
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/ocr-config",
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
         )
 
     if resp.status_code >= 400:
@@ -224,11 +280,10 @@ async def ocr_config(request: Request):
 
 @app.get("/ai-summary")
 async def ai_summary(request: Request):
-    auth_header = request.headers.get("authorization")
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.get(
             f"{BACKEND_URL}/ai-summary",
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
             timeout=20,
         )
 
@@ -240,13 +295,12 @@ async def ai_summary(request: Request):
 
 @app.post("/ai-chat")
 async def ai_chat(request: Request):
-    auth_header = request.headers.get("authorization")
     data = await request.json()
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/ai-chat",
             json=data,
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
             timeout=20,
         )
 
@@ -258,13 +312,12 @@ async def ai_chat(request: Request):
 
 @app.post("/receipts")
 async def add_receipt(request: Request):
-    auth_header = request.headers.get("authorization")
     data = await request.json()
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/receipts",
             json=data,
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
         )
 
     if resp.status_code >= 400:
@@ -275,13 +328,12 @@ async def add_receipt(request: Request):
 
 @app.post("/receipts/batch")
 async def add_receipts_batch(request: Request):
-    auth_header = request.headers.get("authorization")
     data = await request.json()
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/receipts/batch",
             json=data,
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
         )
 
     if resp.status_code >= 400:
@@ -292,13 +344,12 @@ async def add_receipts_batch(request: Request):
 
 @app.post("/receipts/extract")
 async def extract_receipt(request: Request):
-    auth_header = request.headers.get("authorization")
     data = await request.json()
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.post(
             f"{BACKEND_URL}/receipts/extract",
             json=data,
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
             timeout=30,
         )
 
@@ -310,11 +361,10 @@ async def extract_receipt(request: Request):
 
 @app.delete("/receipts/{receipt_id}")
 async def delete_receipt(receipt_id: int, request: Request):
-    auth_header = request.headers.get("authorization")
     async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
         resp = await client.delete(
             f"{BACKEND_URL}/receipts/{receipt_id}",
-            headers={"Authorization": auth_header} if auth_header else None,
+            headers=session_headers(request) or None,
         )
 
     if resp.status_code >= 400:

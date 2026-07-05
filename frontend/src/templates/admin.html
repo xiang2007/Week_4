@@ -434,7 +434,7 @@
 
   <script>
     const state = {
-      token: localStorage.getItem('receiptManagerAdminToken') || '',
+      authenticated: false,
     };
 
     const form = document.getElementById('admin-login-form');
@@ -477,15 +477,16 @@
       statusEl.className = 'status';
     }
 
-    function setAuthenticated(token) {
-      state.token = token;
-      localStorage.setItem('receiptManagerAdminToken', token);
+    function setAuthenticated() {
+      state.authenticated = true;
       document.body.classList.add('admin-authenticated');
     }
 
-    function clearAuthenticated() {
-      state.token = '';
-      localStorage.removeItem('receiptManagerAdminToken');
+    async function clearAuthenticated() {
+      try {
+        await fetch('/admin/auth/logout', { method: 'POST' });
+      } catch {}
+      state.authenticated = false;
       document.body.classList.remove('admin-authenticated');
       accountsBody.innerHTML = '';
       accountCount.textContent = 'Login required';
@@ -530,10 +531,9 @@
 
     async function loadAccounts() {
       accountCount.textContent = 'Loading accounts...';
-      const headers = { 'Authorization': `Bearer ${state.token}` };
       const [accountsResp, insightsResp] = await Promise.all([
-        fetch('/admin/accounts', { headers }),
-        fetch('/admin/insights', { headers }),
+        fetch('/admin/accounts'),
+        fetch('/admin/insights'),
       ]);
       const data = await accountsResp.json();
 
@@ -572,7 +572,7 @@
           throw new Error(data.detail || 'Admin login failed');
         }
 
-        setAuthenticated(data.token);
+        setAuthenticated();
         passwordInput.value = '';
         await loadAccounts();
       } catch (err) {
@@ -596,7 +596,9 @@
       }
     });
 
-    logoutBtn.addEventListener('click', clearAuthenticated);
+    logoutBtn.addEventListener('click', () => {
+      clearAuthenticated();
+    });
 
     resetForm.addEventListener('submit', async e => {
       e.preventDefault();
@@ -610,7 +612,6 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${state.token}`,
           },
           body: JSON.stringify({
             accountName: resetAccountInput.value,
@@ -633,10 +634,18 @@
       }
     });
 
-    if (state.token) {
-      setAuthenticated(state.token);
-      loadAccounts().catch(() => clearAuthenticated());
+    async function restoreAdminSession() {
+      try {
+        const resp = await fetch('/admin/auth/me');
+        if (!resp.ok) throw new Error('Admin login required');
+        setAuthenticated();
+        await loadAccounts();
+      } catch {
+        await clearAuthenticated();
+      }
     }
+
+    restoreAdminSession();
   </script>
 </body>
 </html>

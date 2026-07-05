@@ -41,7 +41,6 @@
     const MAX_ANNUAL_INCOME = 1000000000000;
     const todayIso = () => new Date().toISOString().slice(0, 10);
     const categoryByKey = key => TAX_RELIEF_CATEGORIES.find(c => c.key === key);
-    const authHeaders = token => ({ Authorization: `Bearer ${token}` });
     const plainChatText = text => String(text || '')
       .replace(/\*\*(.*?)\*\*/g, '$1')
       .replace(/__(.*?)__/g, '$1')
@@ -120,8 +119,8 @@
     }
 
     function App() {
-      const [token, setToken] = useState(localStorage.getItem('receiptManagerToken') || '');
-      const [accountName, setAccountName] = useState(localStorage.getItem('receiptManagerAccount') || '');
+      const [accountName, setAccountName] = useState('');
+      const [sessionChecked, setSessionChecked] = useState(false);
       const [authMode, setAuthMode] = useState('login');
       const [authError, setAuthError] = useState('');
       const [receipts, setReceipts] = useState([]);
@@ -144,7 +143,7 @@
       const [toast, setToast] = useState('');
       const [preview, setPreview] = useState('');
 
-      const authenticated = Boolean(token && accountName);
+      const authenticated = Boolean(accountName);
       const confirmed = receipts.filter(r => r.confirmed);
       const pending = receipts.filter(r => !r.confirmed);
       const claims = useMemo(() => calculateClaimTotals(confirmed), [confirmed]);
@@ -183,34 +182,43 @@
       }, [taxRebateAmount]);
 
       useEffect(() => {
-        if (!token || !accountName) return;
-        setAuthenticated(token, accountName);
-        loadReceipts(token).catch(() => clearAuthenticated());
+        restoreSession();
       }, []);
 
       useEffect(() => {
         loadTaxPlan();
       }, [receipts]);
 
-      function setAuthenticated(nextToken, nextAccount) {
-        setToken(nextToken);
-        setAccountName(nextAccount);
-        localStorage.setItem('receiptManagerToken', nextToken);
-        localStorage.setItem('receiptManagerAccount', nextAccount);
+      async function restoreSession() {
+        try {
+          const resp = await fetch('/auth/me');
+          const data = await readJson(resp);
+          if (!resp.ok) throw new Error(data.detail || 'Login required');
+          setAuthenticated(data.account_name);
+          await loadReceipts();
+        } catch {
+          setAccountName('');
+        } finally {
+          setSessionChecked(true);
+        }
       }
 
-      function clearAuthenticated() {
-        setToken('');
+      function setAuthenticated(nextAccount) {
+        setAccountName(nextAccount);
+      }
+
+      async function clearAuthenticated() {
+        try {
+          await fetch('/auth/logout', { method: 'POST' });
+        } catch {}
         setAccountName('');
         setReceipts([]);
         setView('dashboard');
         setChatOpen(false);
-        localStorage.removeItem('receiptManagerToken');
-        localStorage.removeItem('receiptManagerAccount');
       }
 
-      async function loadReceipts(authToken = token) {
-        const resp = await fetch('/receipts', { headers: authHeaders(authToken) });
+      async function loadReceipts() {
+        const resp = await fetch('/receipts');
         const data = await readJson(resp);
         if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
         setReceipts((data.receipts || []).map(r => ({
@@ -225,14 +233,14 @@
           confirmed: true,
           needsReview: false,
         })));
-        loadOcrConfig(authToken);
-        loadAiSummary(authToken);
-        loadTaxPlan(authToken);
+        loadOcrConfig();
+        loadAiSummary();
+        loadTaxPlan(true);
       }
 
-      async function loadOcrConfig(authToken = token) {
+      async function loadOcrConfig() {
         try {
-          const resp = await fetch('/ocr-config', { headers: authHeaders(authToken) });
+          const resp = await fetch('/ocr-config');
           const data = await readJson(resp);
           if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
           setOcrConfig(data);
@@ -242,10 +250,10 @@
         }
       }
 
-      async function loadAiSummary(authToken = token) {
+      async function loadAiSummary() {
         setSummary(s => ({ ...s, status: 'Updating' }));
         try {
-          const resp = await fetch('/ai-summary', { headers: authHeaders(authToken) });
+          const resp = await fetch('/ai-summary');
           const data = await readJson(resp);
           if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
           setSummary({
@@ -260,12 +268,12 @@
         }
       }
 
-      async function loadTaxPlan(authToken = token) {
+      async function loadTaxPlan(useSession = authenticated) {
         const receiptItems = confirmed.map(r => ({ categoryKey: r.categoryKey, amount: Number(r.amount || 0) }));
         setTaxPlanStatus('Updating');
         try {
-          const resp = authToken
-            ? await fetch('/tax-summary', { method: 'POST', headers: authHeaders(authToken) })
+          const resp = useSession
+            ? await fetch('/tax-summary', { method: 'POST' })
             : await fetch('/tax-summary', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -298,9 +306,9 @@
           });
           const data = await readJson(resp);
           if (!resp.ok) throw new Error(data.detail || 'Authentication failed');
-          setAuthenticated(data.token, data.account_name);
+          setAuthenticated(data.account_name);
           event.currentTarget.reset();
-          await loadReceipts(data.token);
+          await loadReceipts();
         } catch (err) {
           setAuthError(err.message);
         }
@@ -348,7 +356,7 @@
         try {
           const resp = await fetch('/receipts', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
           const data = await readJson(resp);
@@ -381,7 +389,7 @@
         try {
           const resp = await fetch('/receipts/batch', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ receipts: payloads }),
           });
           const data = await readJson(resp);
@@ -417,7 +425,7 @@
         try {
           const resp = await fetch('/receipts/extract', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ imageDataUrl: receipt.imageDataUrl }),
           });
           const data = await readJson(resp);
@@ -467,7 +475,7 @@
 
       async function deleteReceipt(id) {
         try {
-          const resp = await fetch(`/receipts/${id}`, { method: 'DELETE', headers: authHeaders(token) });
+          const resp = await fetch(`/receipts/${id}`, { method: 'DELETE' });
           const data = await readJson(resp);
           if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
           setReceipts(items => items.filter(r => r.id !== id));
@@ -532,7 +540,7 @@
         try {
           const resp = await fetch('/ai-chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message }),
           });
           const data = await readJson(resp);
@@ -543,6 +551,10 @@
         } finally {
           setChatBusy(false);
         }
+      }
+
+      if (!sessionChecked) {
+        return null;
       }
 
       if (!authenticated) {

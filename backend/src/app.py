@@ -10,11 +10,11 @@ import urllib.parse
 import urllib.request
 from hashlib import sha256
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File
-from fastapi import Body, Header, HTTPException
+from fastapi import Body, Cookie, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel #add
 
@@ -23,6 +23,9 @@ DATA_DIR = BASE_DIR / "data"
 ACCOUNTS_DB = DATA_DIR / "accounts.db"
 AUTH_TOKENS: dict[str, str] = {}
 ADMIN_TOKENS: set[str] = set()
+SESSION_COOKIE_NAME = "receipt_manager_session"
+ADMIN_SESSION_COOKIE_NAME = "receipt_manager_admin_session"
+SESSION_DAYS = int(os.getenv("SESSION_DAYS", "7"))
 ADMIN_ACCOUNT_NAME = os.getenv("ADMIN_ACCOUNT_NAME", "admin").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -33,10 +36,13 @@ if OCR_PROVIDER not in {"manual", "gemini", "paddle"}:
 MAX_RECEIPT_AMOUNT = float(os.getenv("MAX_RECEIPT_AMOUNT", "100000"))
 MIN_RECEIPT_AMOUNT = 0.01
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+SUPABASE_SECRET_KEY = (
+    os.getenv("SUPABASE_SECRET_KEY", "").strip()
+    or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+)
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "receipt-images").strip()
 SUPABASE_SIGNED_URL_SECONDS = int(os.getenv("SUPABASE_SIGNED_URL_SECONDS", "3600"))
-SUPABASE_STORAGE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and SUPABASE_STORAGE_BUCKET)
+SUPABASE_STORAGE_ENABLED = bool(SUPABASE_URL and SUPABASE_SECRET_KEY and SUPABASE_STORAGE_BUCKET)
 
 
 def hash_password(password: str) -> str:
@@ -106,6 +112,78 @@ def init_accounts_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                account_name TEXT NOT NULL,
+                role TEXT NOT NULL CHECK (role IN ('user', 'admin')),
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def create_session(account_name: str, role: str) -> str:
+    session_id = secrets.token_urlsafe(32)
+    expires_at = (utc_now() + timedelta(days=SESSION_DAYS)).isoformat()
+    with sqlite3.connect(ACCOUNTS_DB) as conn:
+        conn.execute(
+            """
+            INSERT INTO sessions (session_id, account_name, role, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (session_id, account_name, role, expires_at),
+        )
+    return session_id
+
+
+def delete_session(session_id: Optional[str]) -> None:
+    if not session_id:
+        return
+    with sqlite3.connect(ACCOUNTS_DB) as conn:
+        conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+
+
+def session_account(session_id: Optional[str], role: str) -> Optional[str]:
+    if not session_id:
+        return None
+    with sqlite3.connect(ACCOUNTS_DB) as conn:
+        row = conn.execute(
+            """
+            SELECT account_name, expires_at
+            FROM sessions
+            WHERE session_id = ? AND role = ?
+            """,
+            (session_id, role),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            expires_at = datetime.fromisoformat(row[1])
+        except ValueError:
+            delete_session(session_id)
+            return None
+        if expires_at <= utc_now():
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            return None
+        return row[0]
+
+
+def set_session_cookie(response: Response, cookie_name: str, session_id: str) -> None:
+    response.set_cookie(
+        key=cookie_name,
+        value=session_id,
+        max_age=SESSION_DAYS * 24 * 60 * 60,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
 
 
 def validate_account_name(account_name: str) -> str:
@@ -118,7 +196,15 @@ def validate_account_name(account_name: str) -> str:
     return normalized
 
 
-def require_user(authorization: Optional[str]) -> str:
+def require_user(
+    authorization: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> str:
+    if session_id:
+        account_name = session_account(session_id, "user")
+        if account_name:
+            return account_name
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Login required")
 
@@ -129,7 +215,13 @@ def require_user(authorization: Optional[str]) -> str:
     return account_name
 
 
-def require_admin(authorization: Optional[str]) -> None:
+def require_admin(
+    authorization: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> None:
+    if session_id and session_account(session_id, "admin"):
+        return
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Admin login required")
 
@@ -306,8 +398,8 @@ def parse_image_data_url(image_data_url: Optional[str]) -> Optional[tuple[str, b
 
 def supabase_headers(content_type: Optional[str] = None) -> dict[str, str]:
     headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": SUPABASE_SECRET_KEY,
+        "Authorization": f"Bearer {SUPABASE_SECRET_KEY}",
     }
     if content_type:
         headers["Content-Type"] = content_type
@@ -712,7 +804,7 @@ def create_backend() -> FastAPI:
         )
 
     @app.post("/auth/signup")
-    async def signup(payload: AuthRequest):
+    async def signup(payload: AuthRequest, response: Response):
         account_name = validate_account_name(payload.accountName)
         if len(payload.password) < 6:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
@@ -727,12 +819,12 @@ def create_backend() -> FastAPI:
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Account name already exists")
 
-        token = secrets.token_urlsafe(32)
-        AUTH_TOKENS[token] = account_name
-        return {"token": token, "account_name": account_name}
+        session_id = create_session(account_name, "user")
+        set_session_cookie(response, SESSION_COOKIE_NAME, session_id)
+        return {"account_name": account_name}
 
     @app.post("/auth/login")
-    async def login(payload: AuthRequest):
+    async def login(payload: AuthRequest, response: Response):
         account_name = validate_account_name(payload.accountName)
         with sqlite3.connect(ACCOUNTS_DB) as conn:
             row = conn.execute(
@@ -744,25 +836,63 @@ def create_backend() -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid account name or password")
 
         init_user_db(account_name)
-        token = secrets.token_urlsafe(32)
-        AUTH_TOKENS[token] = account_name
-        return {"token": token, "account_name": account_name}
+        session_id = create_session(account_name, "user")
+        set_session_cookie(response, SESSION_COOKIE_NAME, session_id)
+        return {"account_name": account_name}
+
+    @app.get("/auth/me")
+    async def auth_me(
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    ):
+        account_name = session_account(receipt_manager_session, "user")
+        if not account_name:
+            raise HTTPException(status_code=401, detail="Login required")
+        return {"account_name": account_name}
+
+    @app.post("/auth/logout")
+    async def logout(
+        response: Response,
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    ):
+        delete_session(receipt_manager_session)
+        response.delete_cookie(SESSION_COOKIE_NAME, samesite="lax")
+        return {"logged_out": True}
 
     @app.post("/admin/auth/login")
-    async def admin_login(payload: AdminAuthRequest):
+    async def admin_login(payload: AdminAuthRequest, response: Response):
         if not (
             secrets.compare_digest(payload.accountName, ADMIN_ACCOUNT_NAME)
             and secrets.compare_digest(payload.password, ADMIN_PASSWORD)
         ):
             raise HTTPException(status_code=401, detail="Invalid admin account name or password")
 
-        token = secrets.token_urlsafe(32)
-        ADMIN_TOKENS.add(token)
-        return {"token": token, "account_name": ADMIN_ACCOUNT_NAME}
+        session_id = create_session(ADMIN_ACCOUNT_NAME, "admin")
+        set_session_cookie(response, ADMIN_SESSION_COOKIE_NAME, session_id)
+        return {"account_name": ADMIN_ACCOUNT_NAME}
+
+    @app.get("/admin/auth/me")
+    async def admin_auth_me(
+        receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
+    ):
+        if not session_account(receipt_manager_admin_session, "admin"):
+            raise HTTPException(status_code=401, detail="Admin login required")
+        return {"account_name": ADMIN_ACCOUNT_NAME}
+
+    @app.post("/admin/auth/logout")
+    async def admin_logout(
+        response: Response,
+        receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
+    ):
+        delete_session(receipt_manager_admin_session)
+        response.delete_cookie(ADMIN_SESSION_COOKIE_NAME, samesite="lax")
+        return {"logged_out": True}
 
     @app.get("/admin/accounts")
-    async def admin_accounts(authorization: Optional[str] = Header(default=None)):
-        require_admin(authorization)
+    async def admin_accounts(
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
+    ):
+        require_admin(authorization, receipt_manager_admin_session)
         with sqlite3.connect(ACCOUNTS_DB) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
@@ -785,8 +915,11 @@ def create_backend() -> FastAPI:
         }
 
     @app.get("/admin/insights")
-    async def admin_insights(authorization: Optional[str] = Header(default=None)):
-        require_admin(authorization)
+    async def admin_insights(
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
+    ):
+        require_admin(authorization, receipt_manager_admin_session)
         with sqlite3.connect(ACCOUNTS_DB) as conn:
             conn.row_factory = sqlite3.Row
             accounts = conn.execute(
@@ -832,8 +965,9 @@ def create_backend() -> FastAPI:
     async def admin_reset_password(
         payload: AdminPasswordResetRequest,
         authorization: Optional[str] = Header(default=None),
+        receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
     ):
-        require_admin(authorization)
+        require_admin(authorization, receipt_manager_admin_session)
         account_name = validate_account_name(payload.accountName)
 
         if len(payload.newPassword) < 6:
@@ -855,8 +989,11 @@ def create_backend() -> FastAPI:
         return {"updated": True, "account_name": account_name}
 
     @app.get("/receipts")
-    async def get_receipts(authorization: Optional[str] = Header(default=None)):
-        account_name = require_user(authorization)
+    async def get_receipts(
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    ):
+        account_name = require_user(authorization, receipt_manager_session)
         init_user_db(account_name)
         with sqlite3.connect(user_db_path(account_name)) as conn:
             conn.row_factory = sqlite3.Row
@@ -887,8 +1024,11 @@ def create_backend() -> FastAPI:
         }
 
     @app.get("/ocr-config")
-    async def ocr_config(authorization: Optional[str] = Header(default=None)):
-        require_user(authorization)
+    async def ocr_config(
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    ):
+        require_user(authorization, receipt_manager_session)
         provider_labels = {
             "manual": "Manual entry",
             "gemini": "Gemini Vision",
@@ -904,8 +1044,9 @@ def create_backend() -> FastAPI:
     async def add_receipt(
         payload: ReceiptCreate,
         authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
-        account_name = require_user(authorization)
+        account_name = require_user(authorization, receipt_manager_session)
         validate_receipt_amount(payload.amount)
         if payload.categoryKey not in TAX_RELIEF_CATEGORIES:
             raise HTTPException(status_code=400, detail="Unknown category")
@@ -947,8 +1088,9 @@ def create_backend() -> FastAPI:
     async def add_receipts_batch(
         payload: ReceiptBatchCreate,
         authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
-        account_name = require_user(authorization)
+        account_name = require_user(authorization, receipt_manager_session)
         if not payload.receipts:
             raise HTTPException(status_code=400, detail="No receipts to save")
         for receipt in payload.receipts:
@@ -997,16 +1139,18 @@ def create_backend() -> FastAPI:
     async def extract_receipt(
         payload: ReceiptExtractRequest,
         authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
-        require_user(authorization)
+        require_user(authorization, receipt_manager_session)
         return generate_receipt_extract(payload.imageDataUrl)
 
     @app.delete("/receipts/{receipt_id}")
     async def delete_receipt(
         receipt_id: int,
         authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
-        account_name = require_user(authorization)
+        account_name = require_user(authorization, receipt_manager_session)
         init_user_db(account_name)
 
         with sqlite3.connect(user_db_path(account_name)) as conn:
@@ -1032,9 +1176,10 @@ def create_backend() -> FastAPI:
     async def tax_summary(
         payload: Optional[dict] = Body(default=None),
         authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
-        if authorization:
-            account_name = require_user(authorization)
+        if authorization or receipt_manager_session:
+            account_name = require_user(authorization, receipt_manager_session)
             init_user_db(account_name)
             with sqlite3.connect(user_db_path(account_name)) as conn:
                 rows = conn.execute(
@@ -1052,8 +1197,11 @@ def create_backend() -> FastAPI:
         return calculate_summary(summary_request.receipts)
 
     @app.get("/ai-summary")
-    async def ai_summary(authorization: Optional[str] = Header(default=None)):
-        account_name = require_user(authorization)
+    async def ai_summary(
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    ):
+        account_name = require_user(authorization, receipt_manager_session)
         init_user_db(account_name)
         with sqlite3.connect(user_db_path(account_name)) as conn:
             conn.row_factory = sqlite3.Row
@@ -1098,8 +1246,9 @@ def create_backend() -> FastAPI:
     async def ai_chat(
         payload: AiChatRequest,
         authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
-        account_name = require_user(authorization)
+        account_name = require_user(authorization, receipt_manager_session)
         message = payload.message.strip()
         if not message:
             raise HTTPException(status_code=400, detail="Message required")
