@@ -431,6 +431,35 @@
         return refined;
       }
 
+      async function refineReceiptAfterGoogleVision(receipt, extractedData) {
+        const rawText = extractedData.rawText || receipt.rawText || '';
+        if (ocrConfig.provider !== 'google_vision' || !rawText.trim()) {
+          return extractedData;
+        }
+
+        const guessedCategoryKey = guessCategoryKey(`${extractedData.title || ''} ${rawText} ${receipt.filename || ''}`);
+        const sourceReceipt = {
+          ...receipt,
+          title: extractedData.title || receipt.title,
+          receiptDate: extractedData.receiptDate || receipt.receiptDate,
+          amount: Number(extractedData.amount || receipt.amount || 0),
+          categoryKey: extractedData.categoryKey || receipt.categoryKey || guessedCategoryKey,
+          rawText,
+        };
+        const refinedReceipt = (await refineReceiptsWithAi([sourceReceipt], 'Using Gemini to refine Google Vision OCR...'))[0];
+        return {
+          ...extractedData,
+          title: refinedReceipt.title || extractedData.title,
+          receiptDate: refinedReceipt.receiptDate || extractedData.receiptDate,
+          amount: Number(refinedReceipt.amount || extractedData.amount || 0),
+          categoryKey: refinedReceipt.categoryKey || extractedData.categoryKey || guessedCategoryKey,
+          needsReview: refinedReceipt.needsReview,
+          message: refinedReceipt.extractionMessage || extractedData.message || '',
+          provider: refinedReceipt.extractionProvider || extractedData.provider || 'google_vision',
+          rawText,
+        };
+      }
+
       async function confirmReceipt(id) {
         if (savingIds.includes(id)) return;
         const r = receipts.find(item => item.id === id);
@@ -508,31 +537,73 @@
         }
       }
 
+      async function readReceiptOcrData(receipt) {
+        const resp = await fetch('/receipts/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageDataUrl: receipt.imageDataUrl }),
+        });
+        const data = await readJson(resp);
+        if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+        return data;
+      }
+
+      function mergeReceiptExtraction(receipt, extractedData) {
+        const guessedCategoryKey = guessCategoryKey(`${extractedData.title || ''} ${extractedData.rawText || ''} ${receipt.filename || ''}`);
+        return {
+          ...receipt,
+          title: extractedData.title || receipt.title,
+          receiptDate: extractedData.receiptDate || receipt.receiptDate,
+          amount: Number(extractedData.amount || receipt.amount || 0),
+          categoryKey: extractedData.categoryKey || receipt.categoryKey || guessedCategoryKey,
+          needsReview: Boolean(extractedData.needsReview || !extractedData.amount || !(extractedData.categoryKey || receipt.categoryKey || guessedCategoryKey) || (extractedData.confidence || 0) < 0.7),
+          extractionMessage: extractedData.message || '',
+          extractionProvider: extractedData.provider || ocrConfig.provider,
+          rawText: extractedData.rawText || receipt.rawText || '',
+        };
+      }
+
       async function extractPendingReceipt(receipt) {
         setExtractingIds(ids => [...ids, receipt.id]);
         try {
-          const resp = await fetch('/receipts/extract', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageDataUrl: receipt.imageDataUrl }),
-          });
-          const data = await readJson(resp);
-          if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
-          const guessedCategoryKey = guessCategoryKey(`${data.title || ''} ${data.rawText || ''} ${receipt.filename || ''}`);
-          updateReceipt(receipt.id, {
-            title: data.title || receipt.title,
-            receiptDate: data.receiptDate || receipt.receiptDate,
-            amount: Number(data.amount || receipt.amount || 0),
-            categoryKey: data.categoryKey || receipt.categoryKey || guessedCategoryKey,
-            needsReview: Boolean(data.needsReview || !data.amount || !(data.categoryKey || receipt.categoryKey || guessedCategoryKey) || (data.confidence || 0) < 0.7),
-            extractionMessage: data.message || '',
-            extractionProvider: data.provider || ocrConfig.provider,
-            rawText: data.rawText || receipt.rawText || '',
-          });
+          const data = await readReceiptOcrData(receipt);
+          const refinedData = await refineReceiptAfterGoogleVision(receipt, data);
+          updateReceipt(receipt.id, mergeReceiptExtraction(receipt, refinedData));
         } catch {
           updateReceipt(receipt.id, { needsReview: true, extractionMessage: 'Receipt extraction failed. Fill in the fields manually.' });
         } finally {
           setExtractingIds(ids => ids.filter(id => id !== receipt.id));
+        }
+      }
+
+      async function rescanPendingReceipts() {
+        const receiptsToScan = pending.filter(r => r.imageDataUrl && !extractingIds.includes(r.id));
+        if (!receiptsToScan.length || !ocrEnabled || !ocrConfig.enabled) return;
+        const ids = receiptsToScan.map(r => r.id);
+        setExtractingIds(current => [...new Set([...current, ...ids])]);
+        setToast(`Reading ${receiptsToScan.length} receipt${receiptsToScan.length === 1 ? '' : 's'} with Google Vision...`);
+        try {
+          const scanned = await Promise.all(receiptsToScan.map(async receipt => {
+            try {
+              const data = await readReceiptOcrData(receipt);
+              return mergeReceiptExtraction(receipt, data);
+            } catch {
+              return {
+                ...receipt,
+                needsReview: true,
+                extractionMessage: 'Receipt extraction failed. Fill in the fields manually.',
+              };
+            }
+          }));
+          setReceipts(items => items.map(item => scanned.find(r => r.id === item.id) || item));
+
+          const receiptsWithText = scanned.filter(r => (r.rawText || '').trim());
+          if (receiptsWithText.length) {
+            await refineReceiptsWithAi(receiptsWithText, `Sending ${receiptsWithText.length} OCR result${receiptsWithText.length === 1 ? '' : 's'} to Gemini in one batch...`);
+          }
+          setToast('Receipt rescan complete.');
+        } finally {
+          setExtractingIds(current => current.filter(id => !ids.includes(id)));
         }
       }
 
@@ -708,6 +779,7 @@
                 removePending={id => setReceipts(items => items.filter(r => r.id !== id))}
                 confirmReceipt={confirmReceipt}
                 saveAllPending={saveAllPending}
+                rescanPendingReceipts={rescanPendingReceipts}
                 handleFiles={handleFiles}
                 openPreview={setPreview}
                 showDashboard={() => setView('dashboard')}
@@ -973,9 +1045,11 @@
       );
     }
 
-    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, handleFiles, openPreview, showDashboard }) {
+    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, rescanPendingReceipts, handleFiles, openPreview, showDashboard }) {
       const fileRef = useRef(null);
       const [dragging, setDragging] = useState(false);
+      const scanningAll = pending.length > 0 && pending.every(r => extractingIds.includes(r.id));
+      const canRescan = pending.some(r => r.imageDataUrl && !extractingIds.includes(r.id));
       return (
         <section className="upload-section" style={{ display: 'block' }}>
           <div className="upload-head">
@@ -1009,7 +1083,10 @@
               <PendingCard key={r.id} receipt={r} confirmed={confirmed} extracting={extractingIds.includes(r.id)} saving={savingIds.includes(r.id)} updateReceipt={updateReceipt} removePending={removePending} confirmReceipt={confirmReceipt} openPreview={openPreview} />
             )) : <p className="empty">All uploaded receipts are saved. Add more files or go back to the dashboard when you are done.</p>}
           </div>
-          {pending.length ? <div className="pending-actions"><button className="btn btn-primary" disabled={savingAll} onClick={saveAllPending} type="button">{savingAll ? 'Saving all...' : 'Save all receipts'}</button></div> : null}
+          {pending.length ? <div className="pending-actions">
+            <button className="btn btn-outline" disabled={!ocrEnabled || !ocrConfig.enabled || !canRescan || scanningAll} onClick={rescanPendingReceipts} type="button">{scanningAll ? 'Rescanning...' : 'Rescan receipts'}</button>
+            <button className="btn btn-primary" disabled={savingAll} onClick={saveAllPending} type="button">{savingAll ? 'Saving all...' : 'Save all receipts'}</button>
+          </div> : null}
         </section>
       );
     }
