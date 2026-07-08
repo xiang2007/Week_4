@@ -30,8 +30,9 @@ ADMIN_ACCOUNT_NAME = os.getenv("ADMIN_ACCOUNT_NAME", "admin").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+GOOGLE_VISION_API_KEY = os.getenv("GOOGLE_VISION_API_KEY", "").strip()
 OCR_PROVIDER = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
-if OCR_PROVIDER not in {"manual", "gemini", "paddle"}:
+if OCR_PROVIDER not in {"manual", "gemini", "google_vision", "paddle"}:
     OCR_PROVIDER = "gemini"
 MAX_RECEIPT_AMOUNT = float(os.getenv("MAX_RECEIPT_AMOUNT", "100000"))
 MIN_RECEIPT_AMOUNT = 0.01
@@ -43,6 +44,7 @@ SUPABASE_SECRET_KEY = (
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "receipt-images").strip()
 SUPABASE_SIGNED_URL_SECONDS = int(os.getenv("SUPABASE_SIGNED_URL_SECONDS", "3600"))
 SUPABASE_STORAGE_ENABLED = bool(SUPABASE_URL and SUPABASE_SECRET_KEY and SUPABASE_STORAGE_BUCKET)
+CATEGORIES_FILE = Path(os.getenv("CATEGORIES_FILE", str(BASE_DIR / "categories.json")))
 
 
 def hash_password(password: str) -> str:
@@ -123,10 +125,64 @@ def init_accounts_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_name TEXT,
+                provider TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('success', 'warning', 'error')),
+                http_status INTEGER,
+                message TEXT NOT NULL,
+                details TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def log_ai_event(
+    provider: str,
+    operation: str,
+    status: str,
+    message: str,
+    account_name: Optional[str] = None,
+    http_status: Optional[int] = None,
+    details: Optional[dict | str] = None,
+) -> None:
+    if status not in {"success", "warning", "error"}:
+        status = "error"
+    if isinstance(details, dict):
+        details_text = json.dumps(details, ensure_ascii=True)[:4000]
+    elif details is None:
+        details_text = None
+    else:
+        details_text = str(details)[:4000]
+
+    try:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_events (account_name, provider, operation, status, http_status, message, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    account_name,
+                    provider,
+                    operation,
+                    status,
+                    http_status,
+                    message[:500],
+                    details_text,
+                ),
+            )
+    except sqlite3.Error:
+        pass
 
 
 def create_session(account_name: str, role: str) -> str:
@@ -333,6 +389,19 @@ class ReceiptExtractRequest(BaseModel):
     imageDataUrl: str
 
 
+class ReceiptBatchParseItem(BaseModel):
+    id: int
+    title: Optional[str] = None
+    receiptDate: Optional[str] = None
+    amount: Optional[float] = None
+    categoryKey: Optional[str] = None
+    rawText: Optional[str] = None
+
+
+class ReceiptBatchParseRequest(BaseModel):
+    receipts: list[ReceiptBatchParseItem]
+
+
 class AiChatRequest(BaseModel):
     message: str
 
@@ -347,22 +416,93 @@ def empty_receipt_extract(provider: str, message: str) -> dict:
         "needsReview": True,
         "provider": provider,
         "message": message,
+        "rawText": "",
     }
 
 
-TAX_RELIEF_CATEGORIES = {
-    "education": {"label": "Education", "limit": 7000},
-    "book_resources": {"label": "Book & Educational Resources", "limit": 1000},
-    "it_equipment": {"label": "IT Equipment / Devices", "limit": 3000},
-    "medical": {"label": "Medical Expenses", "limit": 15000},
-    "selfemployed": {"label": "Self-Employed / Professional Fees", "limit": 2500},
-    "insurance": {"label": "Insurance Premiums", "limit": 3000},
-    "life_insurance": {"label": "Life Insurance", "limit": 3000},
-    "retirement": {"label": "Retirement Contributions (CPF/EWK)", "limit": None},
-    "healthcare": {"label": "Healthcare", "limit": 3000},
-    "renewable_energy": {"label": "Renewable Energy Equipment", "limit": 800},
-    "residential": {"label": "Residential Accommodation", "limit": 2500},
-}
+DEFAULT_TAX_RELIEF_CATEGORIES = [
+    {"key": "education", "label": "Education", "limit": 7000, "color": "#156F67", "keywords": ["tuition", "course", "school", "college", "university", "education", "training", "exam", "academy", "seminar"]},
+    {"key": "book_resources", "label": "Book & Educational Resources", "limit": 1000, "color": "#C7772E", "keywords": ["book", "bookstore", "bookshop", "stationery", "textbook", "journal", "magazine", "educational resource", "popular", "mph"]},
+    {"key": "it_equipment", "label": "IT Equipment / Devices", "limit": 3000, "color": "#416D94", "keywords": ["laptop", "computer", "tablet", "keyboard", "mouse", "monitor", "printer", "smartphone", "iphone", "ipad", "samsung", "huawei", "xiaomi", "lenovo", "dell", "acer", "asus", "router", "ssd", "hard drive"]},
+    {"key": "medical", "label": "Medical Expenses", "limit": 15000, "color": "#8B5E34", "keywords": ["clinic", "hospital", "pharmacy", "doctor", "dental", "dentist", "optical", "optometrist", "medicine", "prescription", "guardian", "watsons", "health lane", "big pharmacy", "treatment"]},
+    {"key": "selfemployed", "label": "Self-Employed / Professional Fees", "limit": 2500, "color": "#6C5A94", "keywords": ["professional fee", "consulting", "consultancy", "freelance", "self-employed", "business registration", "ssm", "accounting fee", "legal fee", "audit fee"]},
+    {"key": "insurance", "label": "Insurance Premiums", "limit": 3000, "color": "#357C8A", "keywords": ["general insurance", "medical insurance", "insurance premium", "policy premium", "takaful premium"]},
+    {"key": "life_insurance", "label": "Life Insurance", "limit": 3000, "color": "#8B4B55", "keywords": ["life insurance", "life assurance"]},
+    {"key": "retirement", "label": "Retirement Contributions (CPF/EWK)", "limit": None, "color": "#4B6F44", "keywords": ["retirement", "cpf", "ewk", "pension", "epf", "kwsp", "prs"]},
+    {"key": "healthcare", "label": "Healthcare", "limit": 3000, "color": "#9A6A2D", "keywords": ["health screening", "vaccination", "vaccine", "fitness", "gym", "sports equipment", "wellness", "physio", "physiotherapy"]},
+    {"key": "renewable_energy", "label": "Renewable Energy Equipment", "limit": 800, "color": "#557A38", "keywords": ["solar", "renewable", "ev charger", "photovoltaic", "inverter", "battery storage", "green energy"]},
+    {"key": "residential", "label": "Residential Accommodation", "limit": 2500, "color": "#7B6A55", "keywords": ["rent", "rental", "accommodation", "residential", "hotel", "hostel", "homestay", "airbnb", "apartment", "condo"]},
+]
+
+
+def normalize_category_config(items: list[dict]) -> dict[str, dict]:
+    categories: dict[str, dict] = {}
+    for item in items:
+        key = str(item.get("key", "")).strip()
+        label = str(item.get("label", "")).strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", key) or not label:
+            continue
+        raw_limit = item.get("limit")
+        limit = None if raw_limit is None else float(raw_limit)
+        keywords = [
+            str(keyword).strip().lower()
+            for keyword in item.get("keywords", [])
+            if str(keyword).strip()
+        ]
+        categories[key] = {
+            "label": label,
+            "limit": limit,
+            "color": str(item.get("color") or "#416D94"),
+            "keywords": keywords,
+        }
+    return categories
+
+
+def load_tax_relief_categories() -> dict[str, dict]:
+    try:
+        with CATEGORIES_FILE.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+        if isinstance(data, list):
+            categories = normalize_category_config(data)
+            if categories:
+                return categories
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    return normalize_category_config(DEFAULT_TAX_RELIEF_CATEGORIES)
+
+
+TAX_RELIEF_CATEGORIES = load_tax_relief_categories()
+CATEGORY_CONFIG_MTIME: Optional[float] = None
+
+
+def refresh_tax_relief_categories() -> None:
+    global CATEGORY_CONFIG_MTIME, TAX_RELIEF_CATEGORIES
+    try:
+        mtime = CATEGORIES_FILE.stat().st_mtime
+    except OSError:
+        mtime = None
+    if mtime == CATEGORY_CONFIG_MTIME:
+        return
+    TAX_RELIEF_CATEGORIES = load_tax_relief_categories()
+    CATEGORY_CONFIG_MTIME = mtime
+
+
+def public_categories() -> list[dict]:
+    return [
+        {
+            "key": key,
+            "label": category["label"],
+            "limit": category["limit"],
+            "color": category.get("color") or "#416D94",
+            "keywords": category.get("keywords", []),
+        }
+        for key, category in TAX_RELIEF_CATEGORIES.items()
+    ]
+
+
+def category_label(category_key: str) -> str:
+    category = TAX_RELIEF_CATEGORIES.get(category_key)
+    return category["label"] if category else "Unknown Category"
 
 
 def normalize_optional_text(value: Optional[str]) -> Optional[str]:
@@ -410,13 +550,28 @@ def quote_storage_path(path: str) -> str:
     return urllib.parse.quote(path.strip("/"), safe="/")
 
 
-def upload_receipt_image(account_name: str, image_data_url: Optional[str]) -> Optional[str]:
+def receipt_storage_filename(title: str, receipt_date: str, extension: str) -> str:
+    base = f"{title}-{receipt_date}".lower()
+    base = re.sub(r"[^a-z0-9._-]+", "-", base).strip("-._")
+    base = re.sub(r"-{2,}", "-", base)
+    if not base:
+        base = "receipt"
+    return f"{base[:80]}-{secrets.token_urlsafe(6)}.{extension}"
+
+
+def upload_receipt_image(
+    account_name: str,
+    image_data_url: Optional[str],
+    title: str,
+    receipt_date: str,
+) -> Optional[str]:
     parsed = parse_image_data_url(image_data_url)
     if not SUPABASE_STORAGE_ENABLED or not parsed:
         return None
 
     content_type, image_bytes, extension = parsed
-    storage_path = f"receipts/{user_storage_prefix(account_name)}/{secrets.token_urlsafe(16)}.{extension}"
+    filename = receipt_storage_filename(title, receipt_date, extension)
+    storage_path = f"receipts/{user_storage_prefix(account_name)}/{filename}"
     url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}/{quote_storage_path(storage_path)}"
     req = urllib.request.Request(
         url,
@@ -514,7 +669,7 @@ def fallback_ai_summary(receipts: list[sqlite3.Row]) -> dict:
         {
             "date": row["receipt_date"] or row["created_at"][:10],
             "title": row["title"] or f"Receipt {row['id']}",
-            "summary": f"{TAX_RELIEF_CATEGORIES[row['category_key']]['label']} claim for RM {row['amount']:.2f}.",
+            "summary": f"{category_label(row['category_key'])} claim for RM {row['amount']:.2f}.",
         }
         for row in receipts
     ]
@@ -536,7 +691,7 @@ def generate_gemini_summary(receipts: list[sqlite3.Row]) -> dict:
             "title": row["title"] or f"Receipt {row['id']}",
             "date": row["receipt_date"] or row["created_at"][:10],
             "amount": row["amount"],
-            "category": TAX_RELIEF_CATEGORIES[row["category_key"]]["label"],
+            "category": category_label(row["category_key"]),
         }
         for row in receipts
     ]
@@ -587,7 +742,7 @@ def receipt_to_advisor_item(row: sqlite3.Row) -> dict:
         "title": row["title"] or f"Receipt {row['id']}",
         "date": row["receipt_date"] or row["created_at"][:10],
         "amount": round(float(row["amount"] or 0), 2),
-        "category": TAX_RELIEF_CATEGORIES[row["category_key"]]["label"],
+        "category": category_label(row["category_key"]),
     }
 
 
@@ -618,8 +773,8 @@ def build_advisor_context(message: str, receipts: list[sqlite3.Row]) -> dict:
     }
     matched_receipts = []
     for row in valid_receipts:
-        category_label = TAX_RELIEF_CATEGORIES[row["category_key"]]["label"]
-        haystack = f"{row['title'] or ''} {category_label} {row['receipt_date'] or ''}".lower()
+        label = category_label(row["category_key"])
+        haystack = f"{row['title'] or ''} {label} {row['receipt_date'] or ''}".lower()
         if any(term in haystack for term in query_terms):
             matched_receipts.append(row)
 
@@ -669,9 +824,10 @@ def fallback_advisor_reply(message: str, context: dict) -> str:
     )
 
 
-def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
+def generate_gemini_chat(message: str, receipts: list[sqlite3.Row], account_name: Optional[str] = None) -> str:
     context = build_advisor_context(message, receipts)
     if not GEMINI_API_KEY:
+        log_ai_event("gemini", "ai_chat", "warning", "Gemini API key is not set; fallback reply used.", account_name)
         return fallback_advisor_reply(message, context)
 
     prompt = (
@@ -697,18 +853,28 @@ def generate_gemini_chat(message: str, receipts: list[sqlite3.Row]) -> str:
     try:
         with urllib.request.urlopen(req, timeout=12) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
+        reply = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        log_ai_event("gemini", "ai_chat", "success", "Gemini chat reply completed.", account_name)
+        return reply
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        message_text = f"Gemini chat HTTP {exc.code}."
+        log_ai_event("gemini", "ai_chat", "error", message_text, account_name, exc.code, body)
+        return "I could not reach Gemini right now. Try again in a moment."
+    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError) as exc:
+        log_ai_event("gemini", "ai_chat", "error", "Gemini chat failed.", account_name, details=repr(exc))
         return "I could not reach Gemini right now. Try again in a moment."
 
 
-def generate_gemini_receipt_extract(image_data_url: str) -> dict:
+def generate_gemini_receipt_extract(image_data_url: str, account_name: Optional[str] = None) -> dict:
     fallback = empty_receipt_extract("gemini", "Gemini could not extract this receipt.")
     if not GEMINI_API_KEY:
+        log_ai_event("gemini", "receipt_extract", "error", "Gemini API key is not set.", account_name)
         return empty_receipt_extract("gemini", "Gemini API key is not set.")
 
     match = re.fullmatch(r"data:(image/(?:png|jpeg|jpg));base64,(.+)", image_data_url)
     if not match:
+        log_ai_event("gemini", "receipt_extract", "warning", "Unsupported receipt image format.", account_name)
         return fallback
 
     categories = [
@@ -748,7 +914,7 @@ def generate_gemini_receipt_extract(image_data_url: str) -> dict:
         category_key = str(parsed.get("categoryKey") or "")
         if category_key and category_key not in TAX_RELIEF_CATEGORIES:
             category_key = ""
-        return {
+        result = {
             "title": str(parsed.get("title") or ""),
             "receiptDate": str(parsed.get("receiptDate") or ""),
             "amount": float(parsed.get("amount") or 0),
@@ -757,9 +923,269 @@ def generate_gemini_receipt_extract(image_data_url: str) -> dict:
             "needsReview": bool(parsed.get("needsReview", True)),
             "provider": "gemini",
             "message": "",
+            "rawText": "",
         }
-    except (urllib.error.URLError, KeyError, ValueError, json.JSONDecodeError, TimeoutError):
+        log_ai_event("gemini", "receipt_extract", "success", "Gemini receipt extraction succeeded.", account_name)
+        return result
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        message = f"Gemini receipt extraction HTTP {exc.code}."
+        log_ai_event("gemini", "receipt_extract", "error", message, account_name, exc.code, body)
         return fallback
+    except (urllib.error.URLError, KeyError, ValueError, json.JSONDecodeError, TimeoutError) as exc:
+        log_ai_event("gemini", "receipt_extract", "error", "Gemini receipt extraction failed.", account_name, details=repr(exc))
+        return fallback
+
+
+def category_from_text(text: str) -> str:
+    lowered = text.lower()
+    scores = {}
+    for key, category in TAX_RELIEF_CATEGORIES.items():
+        score = 0
+        for keyword in category.get("keywords", []):
+            if keyword in lowered:
+                score += 2 if " " in keyword else 1
+        scores[key] = score
+    if not scores:
+        return ""
+    best_key, best_score = max(scores.items(), key=lambda item: item[1])
+    return best_key if best_score else ""
+
+
+def parse_receipt_text(raw_text: str, provider: str, message: str = "") -> dict:
+    text = raw_text.strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    amount = 0.0
+    amount_patterns = [
+        r"(?:grand\s+total|net\s+total|total\s+amount|amount\s+due|total|subtotal)\D{0,20}(?:rm|myr)?\s*([0-9][0-9,]*\.\d{2})",
+        r"(?:rm|myr)\s*([0-9][0-9,]*\.\d{2})",
+    ]
+    candidates: list[float] = []
+    lowered_text = text.lower()
+    for pattern in amount_patterns:
+        for match in re.finditer(pattern, lowered_text, flags=re.IGNORECASE):
+            try:
+                candidates.append(float(match.group(1).replace(",", "")))
+            except ValueError:
+                pass
+    if candidates:
+        amount = max(candidates)
+
+    receipt_date = ""
+    date_patterns = [
+        r"\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b",
+        r"\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b",
+    ]
+    for pattern in date_patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        try:
+            groups = match.groups()
+            if len(groups[0]) == 4:
+                parsed_date = date(int(groups[0]), int(groups[1]), int(groups[2]))
+            else:
+                parsed_date = date(int(groups[2]), int(groups[1]), int(groups[0]))
+            receipt_date = parsed_date.isoformat()
+            break
+        except ValueError:
+            continue
+
+    ignored_title_words = ("tax invoice", "invoice", "receipt", "cash bill")
+    title = ""
+    for line in lines[:6]:
+        if len(line) < 3:
+            continue
+        if any(word in line.lower() for word in ignored_title_words):
+            continue
+        if re.search(r"\d{2,}", line):
+            continue
+        title = line[:80]
+        break
+
+    category_key = category_from_text(text)
+    confidence = 0.35
+    if amount:
+        confidence += 0.25
+    if receipt_date:
+        confidence += 0.2
+    if category_key:
+        confidence += 0.15
+    if title:
+        confidence += 0.05
+    confidence = min(confidence, 0.9)
+
+    return {
+        "title": title,
+        "receiptDate": receipt_date,
+        "amount": amount,
+        "categoryKey": category_key,
+        "confidence": confidence,
+        "needsReview": confidence < 0.75 or not amount or not category_key,
+        "provider": provider,
+        "message": message,
+        "rawText": text,
+    }
+
+
+def generate_google_vision_receipt_extract(image_data_url: str, account_name: Optional[str] = None) -> dict:
+    if not GOOGLE_VISION_API_KEY:
+        log_ai_event("google_vision", "ocr_extract", "error", "Google Vision API key is not set.", account_name)
+        return empty_receipt_extract("google_vision", "Google Vision API key is not set.")
+
+    match = re.fullmatch(r"data:image/(?:png|jpeg|jpg|webp);base64,(.+)", image_data_url)
+    if not match:
+        log_ai_event("google_vision", "ocr_extract", "warning", "Unsupported receipt image format.", account_name)
+        return empty_receipt_extract("google_vision", "Unsupported receipt image format.")
+
+    body = json.dumps({
+        "requests": [{
+            "image": {"content": match.group(1)},
+            "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
+        }]
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://vision.googleapis.com/v1/images:annotate?key={GOOGLE_VISION_API_KEY}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        response = data["responses"][0]
+        if response.get("error"):
+            error = response["error"]
+            message = error.get("message", "Google Vision OCR failed.")
+            log_ai_event(
+                "google_vision",
+                "ocr_extract",
+                "error",
+                message,
+                account_name,
+                error.get("code"),
+                error,
+            )
+            return empty_receipt_extract("google_vision", message)
+        raw_text = response.get("fullTextAnnotation", {}).get("text", "")
+        if not raw_text and response.get("textAnnotations"):
+            raw_text = response["textAnnotations"][0].get("description", "")
+        if not raw_text.strip():
+            log_ai_event("google_vision", "ocr_extract", "warning", "No text was detected.", account_name)
+            return empty_receipt_extract("google_vision", "No text was detected. Fill in the fields manually.")
+        result = parse_receipt_text(raw_text, "google_vision")
+        log_ai_event(
+            "google_vision",
+            "ocr_extract",
+            "success" if not result["needsReview"] else "warning",
+            "Google Vision OCR completed.",
+            account_name,
+            details={"chars": len(raw_text), "needsReview": result["needsReview"], "confidence": result["confidence"]},
+        )
+        return result
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        message = f"Google Vision OCR HTTP {exc.code}."
+        log_ai_event("google_vision", "ocr_extract", "error", message, account_name, exc.code, body)
+        return empty_receipt_extract("google_vision", "Google Vision OCR failed. Fill in the fields manually.")
+    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError) as exc:
+        log_ai_event("google_vision", "ocr_extract", "error", "Google Vision OCR failed.", account_name, details=repr(exc))
+        return empty_receipt_extract("google_vision", "Google Vision OCR failed. Fill in the fields manually.")
+
+
+def parse_gemini_receipt_batch(receipts: list[ReceiptBatchParseItem], account_name: Optional[str] = None) -> dict:
+    if not GEMINI_API_KEY:
+        log_ai_event("gemini", "batch_parse", "error", "Gemini API key is not set.", account_name)
+        return {"receipts": [], "message": "Gemini API key is not set."}
+
+    categories = [
+        {"key": key, "label": value["label"]}
+        for key, value in TAX_RELIEF_CATEGORIES.items()
+    ]
+    receipt_context = [
+        {
+            "id": item.id,
+            "existing": {
+                "title": item.title or "",
+                "receiptDate": item.receiptDate or "",
+                "amount": item.amount or 0,
+                "categoryKey": item.categoryKey or "",
+            },
+            "ocrText": (item.rawText or "")[:5000],
+        }
+        for item in receipts
+        if (item.rawText or "").strip()
+    ]
+    if not receipt_context:
+        log_ai_event("gemini", "batch_parse", "warning", "No OCR text is available for Gemini batch parsing.", account_name)
+        return {"receipts": [], "message": "No OCR text is available for Gemini batch parsing."}
+
+    prompt = (
+        "You are parsing OCR text from multiple Malaysian receipt images. "
+        "Return compact JSON only with key receipts. receipts must be an array with one item per input id. "
+        "Each item must have: id, title, receiptDate, amount, categoryKey, confidence, needsReview. "
+        "Use existing fields when OCR text does not improve them. receiptDate must be YYYY-MM-DD if visible. "
+        "amount must be the final total paid. categoryKey must be one of the allowed keys or empty string. "
+        "Set needsReview true if amount/category/date is uncertain.\n"
+        f"Allowed categories: {json.dumps(categories, ensure_ascii=True)}\n"
+        f"Receipts: {json.dumps(receipt_context, ensure_ascii=True)}"
+    )
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "response_mime_type": "application/json",
+        },
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        parsed = json.loads(data["candidates"][0]["content"]["parts"][0]["text"])
+        parsed_receipts = parsed.get("receipts", []) if isinstance(parsed, dict) else []
+        results = []
+        for item in parsed_receipts:
+            category_key = str(item.get("categoryKey") or "")
+            if category_key and category_key not in TAX_RELIEF_CATEGORIES:
+                category_key = ""
+            try:
+                receipt_id = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            results.append({
+                "id": receipt_id,
+                "title": str(item.get("title") or ""),
+                "receiptDate": str(item.get("receiptDate") or ""),
+                "amount": float(item.get("amount") or 0),
+                "categoryKey": category_key,
+                "confidence": max(0, min(1, float(item.get("confidence") or 0))),
+                "needsReview": bool(item.get("needsReview", True)),
+                "provider": "gemini_batch",
+                "message": "",
+            })
+        log_ai_event(
+            "gemini",
+            "batch_parse",
+            "success",
+            "Gemini batch parsing completed.",
+            account_name,
+            details={"inputReceipts": len(receipt_context), "parsedReceipts": len(results)},
+        )
+        return {"receipts": results, "message": ""}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        message = f"Gemini batch parsing HTTP {exc.code}."
+        log_ai_event("gemini", "batch_parse", "error", message, account_name, exc.code, body)
+        return {"receipts": [], "message": "Gemini batch parsing failed. Review receipts manually."}
+    except (urllib.error.URLError, KeyError, ValueError, json.JSONDecodeError, TimeoutError) as exc:
+        log_ai_event("gemini", "batch_parse", "error", "Gemini batch parsing failed.", account_name, details=repr(exc))
+        return {"receipts": [], "message": "Gemini batch parsing failed. Review receipts manually."}
 
 
 def generate_paddle_receipt_extract(image_data_url: str) -> dict:
@@ -769,12 +1195,14 @@ def generate_paddle_receipt_extract(image_data_url: str) -> dict:
     )
 
 
-def generate_receipt_extract(image_data_url: str) -> dict:
+def generate_receipt_extract(image_data_url: str, account_name: Optional[str] = None) -> dict:
     if OCR_PROVIDER == "manual":
         return empty_receipt_extract("manual", "OCR is disabled. Fill in the receipt fields manually.")
+    if OCR_PROVIDER == "google_vision":
+        return generate_google_vision_receipt_extract(image_data_url, account_name)
     if OCR_PROVIDER == "paddle":
         return generate_paddle_receipt_extract(image_data_url)
-    return generate_gemini_receipt_extract(image_data_url)
+    return generate_gemini_receipt_extract(image_data_url, account_name)
 
 
 def clear_ai_summary_cache(conn: sqlite3.Connection) -> None:
@@ -783,6 +1211,11 @@ def clear_ai_summary_cache(conn: sqlite3.Connection) -> None:
 def create_backend() -> FastAPI:
     app = FastAPI(title="Backend server")
     init_accounts_db()
+
+    @app.middleware("http")
+    async def refresh_category_config(request, call_next):
+        refresh_tax_relief_categories()
+        return await call_next(request)
 
     @app.post("/process")
     async def process(files: list[UploadFile] = File(...)):
@@ -947,7 +1380,7 @@ def create_backend() -> FastAPI:
 
         top_categories = sorted(
             [
-                {"category": TAX_RELIEF_CATEGORIES[key]["label"], "count": count}
+                {"category": category_label(key), "count": count}
                 for key, count in category_counts.items()
                 if key in TAX_RELIEF_CATEGORIES
             ],
@@ -959,6 +1392,40 @@ def create_backend() -> FastAPI:
             "receipt_count": total_receipts,
             "newest_upload": newest_upload,
             "top_categories": top_categories,
+        }
+
+    @app.get("/admin/ai-events")
+    async def admin_ai_events(
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
+    ):
+        require_admin(authorization, receipt_manager_admin_session)
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT id, account_name, provider, operation, status, http_status, message, details, created_at
+                FROM ai_events
+                ORDER BY id DESC
+                LIMIT 80
+                """
+            ).fetchall()
+
+        return {
+            "events": [
+                {
+                    "id": row["id"],
+                    "account_name": row["account_name"],
+                    "provider": row["provider"],
+                    "operation": row["operation"],
+                    "status": row["status"],
+                    "http_status": row["http_status"],
+                    "message": row["message"],
+                    "details": row["details"],
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
         }
 
     @app.post("/admin/accounts/reset-password")
@@ -1023,6 +1490,10 @@ def create_backend() -> FastAPI:
             ]
         }
 
+    @app.get("/categories")
+    async def categories():
+        return {"categories": public_categories()}
+
     @app.get("/ocr-config")
     async def ocr_config(
         authorization: Optional[str] = Header(default=None),
@@ -1032,6 +1503,7 @@ def create_backend() -> FastAPI:
         provider_labels = {
             "manual": "Manual entry",
             "gemini": "Gemini Vision",
+            "google_vision": "Google Vision OCR",
             "paddle": "PaddleOCR local",
         }
         return {
@@ -1051,18 +1523,22 @@ def create_backend() -> FastAPI:
         if payload.categoryKey not in TAX_RELIEF_CATEGORIES:
             raise HTTPException(status_code=400, detail="Unknown category")
 
-        image_storage_path = upload_receipt_image(account_name, payload.imageDataUrl)
-        image_data_url = None if image_storage_path else payload.imageDataUrl
-
         init_user_db(account_name)
         with sqlite3.connect(user_db_path(account_name)) as conn:
             category_count = conn.execute(
                 "SELECT COUNT(*) FROM receipts WHERE category_key = ?",
                 (payload.categoryKey,),
             ).fetchone()[0]
-            category_label = TAX_RELIEF_CATEGORIES[payload.categoryKey]["label"]
-            title = normalize_optional_text(payload.title) or f"Receipt {category_label} {category_count + 1}"
+            label = category_label(payload.categoryKey)
+            title = normalize_optional_text(payload.title) or f"Receipt {label} {category_count + 1}"
             receipt_date = normalize_optional_text(payload.receiptDate) or date.today().isoformat()
+            image_storage_path = upload_receipt_image(
+                account_name,
+                payload.imageDataUrl,
+                title,
+                receipt_date,
+            )
+            image_data_url = None if image_storage_path else payload.imageDataUrl
             cursor = conn.execute(
                 """
                 INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, image_storage_path)
@@ -1109,10 +1585,15 @@ def create_backend() -> FastAPI:
             }
             for receipt in payload.receipts:
                 counts[receipt.categoryKey] = counts.get(receipt.categoryKey, 0) + 1
-                category_label = TAX_RELIEF_CATEGORIES[receipt.categoryKey]["label"]
-                title = normalize_optional_text(receipt.title) or f"Receipt {category_label} {counts[receipt.categoryKey]}"
+                label = category_label(receipt.categoryKey)
+                title = normalize_optional_text(receipt.title) or f"Receipt {label} {counts[receipt.categoryKey]}"
                 receipt_date = normalize_optional_text(receipt.receiptDate) or date.today().isoformat()
-                image_storage_path = upload_receipt_image(account_name, receipt.imageDataUrl)
+                image_storage_path = upload_receipt_image(
+                    account_name,
+                    receipt.imageDataUrl,
+                    title,
+                    receipt_date,
+                )
                 image_data_url = None if image_storage_path else receipt.imageDataUrl
                 cursor = conn.execute(
                     """
@@ -1141,8 +1622,17 @@ def create_backend() -> FastAPI:
         authorization: Optional[str] = Header(default=None),
         receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
-        require_user(authorization, receipt_manager_session)
-        return generate_receipt_extract(payload.imageDataUrl)
+        account_name = require_user(authorization, receipt_manager_session)
+        return generate_receipt_extract(payload.imageDataUrl, account_name)
+
+    @app.post("/receipts/parse-batch")
+    async def parse_receipts_batch(
+        payload: ReceiptBatchParseRequest,
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    ):
+        account_name = require_user(authorization, receipt_manager_session)
+        return parse_gemini_receipt_batch(payload.receipts, account_name)
 
     @app.delete("/receipts/{receipt_id}")
     async def delete_receipt(
@@ -1264,7 +1754,7 @@ def create_backend() -> FastAPI:
                 """
             ).fetchall()
 
-        return {"reply": generate_gemini_chat(message, rows)}
+        return {"reply": generate_gemini_chat(message, rows, account_name)}
 
     return app
 

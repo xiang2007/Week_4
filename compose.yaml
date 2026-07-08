@@ -5,14 +5,21 @@ services:
     environment:
       PORT: ${BACKEND_PORT:?Set BACKEND_PORT}
       HEALTHCHECK_HOST: ${HEALTHCHECK_HOST:?Set HEALTHCHECK_HOST}
-      OCR_PROVIDER: ${OCR_PROVIDER:-gemini}
+      OCR_PROVIDER: ${OCR_PROVIDER:-google_vision}
+      GOOGLE_VISION_API_KEY: ${GOOGLE_VISION_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
       ADMIN_ACCOUNT_NAME: ${ADMIN_ACCOUNT_NAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       MAX_RECEIPT_AMOUNT: ${MAX_RECEIPT_AMOUNT:-100000}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-receipt-images}
+      SUPABASE_SIGNED_URL_SECONDS: ${SUPABASE_SIGNED_URL_SECONDS:-3600}
     ports:
       - "${BACKEND_PORT:?Set BACKEND_PORT}:${BACKEND_PORT:?Set BACKEND_PORT}"
+    volumes:
+      - ./backend/categories.json:/app/categories.json:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import os, socket; s = socket.create_connection((os.environ['HEALTHCHECK_HOST'], int(os.environ['PORT'])), timeout=2); s.close()\""]
       interval: 10s

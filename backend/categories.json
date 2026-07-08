@@ -1,0 +1,79 @@
+[
+  {
+    "key": "education",
+    "label": "Education",
+    "limit": 7000,
+    "color": "#156F67",
+    "keywords": ["tuition", "course", "school", "college", "university", "education", "training", "exam", "academy", "seminar"]
+  },
+  {
+    "key": "book_resources",
+    "label": "Book & Educational Resources",
+    "limit": 1000,
+    "color": "#C7772E",
+    "keywords": ["book", "bookstore", "bookshop", "stationery", "textbook", "journal", "magazine", "educational resource", "popular", "mph"]
+  },
+  {
+    "key": "it_equipment",
+    "label": "IT Equipment / Devices",
+    "limit": 3000,
+    "color": "#416D94",
+    "keywords": ["laptop", "computer", "tablet", "keyboard", "mouse", "monitor", "printer", "smartphone", "iphone", "ipad", "samsung", "huawei", "xiaomi", "lenovo", "dell", "acer", "asus", "router", "ssd", "hard drive"]
+  },
+  {
+    "key": "medical",
+    "label": "Medical Expenses",
+    "limit": 15000,
+    "color": "#8B5E34",
+    "keywords": ["clinic", "hospital", "pharmacy", "doctor", "dental", "dentist", "optical", "optometrist", "medicine", "prescription", "guardian", "watsons", "health lane", "big pharmacy", "treatment"]
+  },
+  {
+    "key": "selfemployed",
+    "label": "Self-Employed / Professional Fees",
+    "limit": 2500,
+    "color": "#6C5A94",
+    "keywords": ["professional fee", "consulting", "consultancy", "freelance", "self-employed", "business registration", "ssm", "accounting fee", "legal fee", "audit fee"]
+  },
+  {
+    "key": "insurance",
+    "label": "Insurance Premiums",
+    "limit": 3000,
+    "color": "#357C8A",
+    "keywords": ["general insurance", "medical insurance", "insurance premium", "policy premium", "takaful premium"]
+  },
+  {
+    "key": "life_insurance",
+    "label": "Life Insurance",
+    "limit": 3000,
+    "color": "#8B4B55",
+    "keywords": ["life insurance", "life assurance"]
+  },
+  {
+    "key": "retirement",
+    "label": "Retirement Contributions (CPF/EWK)",
+    "limit": null,
+    "color": "#4B6F44",
+    "keywords": ["retirement", "cpf", "ewk", "pension", "epf", "kwsp", "prs"]
+  },
+  {
+    "key": "healthcare",
+    "label": "Healthcare",
+    "limit": 3000,
+    "color": "#9A6A2D",
+    "keywords": ["health screening", "vaccination", "vaccine", "fitness", "gym", "sports equipment", "wellness", "physio", "physiotherapy"]
+  },
+  {
+    "key": "renewable_energy",
+    "label": "Renewable Energy Equipment",
+    "limit": 800,
+    "color": "#557A38",
+    "keywords": ["solar", "renewable", "ev charger", "photovoltaic", "inverter", "battery storage", "green energy"]
+  },
+  {
+    "key": "residential",
+    "label": "Residential Accommodation",
+    "limit": 2500,
+    "color": "#7B6A55",
+    "keywords": ["rent", "rental", "accommodation", "residential", "hotel", "hostel", "homestay", "airbnb", "apartment", "condo"]
+  }
+]

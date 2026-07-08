@@ -20,7 +20,7 @@
     {% raw %}
     const { useEffect, useMemo, useRef, useState } = React;
 
-    const TAX_RELIEF_CATEGORIES = [
+    const DEFAULT_TAX_RELIEF_CATEGORIES = [
       { key: "education", label: "Education", limit: 7000, color: "#156F67" },
       { key: "book_resources", label: "Book & Educational Resources", limit: 1000, color: "#C7772E" },
       { key: "it_equipment", label: "IT Equipment / Devices", limit: 3000, color: "#416D94" },
@@ -33,6 +33,7 @@
       { key: "renewable_energy", label: "Renewable Energy Equipment", limit: 800, color: "#557A38" },
       { key: "residential", label: "Residential Accommodation", limit: 2500, color: "#7B6A55" },
     ];
+    let TAX_RELIEF_CATEGORIES = DEFAULT_TAX_RELIEF_CATEGORIES;
 
     const Icon = ({ name, size = 18 }) => <i data-lucide={name} style={{ width: size, height: size }} aria-hidden="true"></i>;
     const fmt = value => 'RM ' + Number(value || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -41,6 +42,22 @@
     const MAX_ANNUAL_INCOME = 1000000000000;
     const todayIso = () => new Date().toISOString().slice(0, 10);
     const categoryByKey = key => TAX_RELIEF_CATEGORIES.find(c => c.key === key);
+    function guessCategoryKey(text) {
+      const lowered = String(text || '').toLowerCase();
+      let bestKey = '';
+      let bestScore = 0;
+      TAX_RELIEF_CATEGORIES.forEach(category => {
+        const score = (category.keywords || []).reduce((total, keyword) => {
+          if (!lowered.includes(String(keyword).toLowerCase())) return total;
+          return total + (String(keyword).includes(' ') ? 2 : 1);
+        }, 0);
+        if (score > bestScore) {
+          bestKey = category.key;
+          bestScore = score;
+        }
+      });
+      return bestKey;
+    }
     const plainChatText = text => String(text || '')
       .replace(/\*\*(.*?)\*\*/g, '$1')
       .replace(/__(.*?)__/g, '$1')
@@ -134,6 +151,7 @@
       const [extractingIds, setExtractingIds] = useState([]);
       const [ocrEnabled, setOcrEnabledState] = useState(localStorage.getItem('receiptManagerOcrEnabled') !== 'false');
       const [ocrConfig, setOcrConfig] = useState({ provider: 'gemini', label: 'Gemini Vision', enabled: true });
+      const [taxCategories, setTaxCategories] = useState(DEFAULT_TAX_RELIEF_CATEGORIES);
       const [summary, setSummary] = useState({ headline: 'No receipts yet', overview: 'Upload receipts to build a timeline.', timeline: [], cached: true, status: 'Ready' });
       const [taxPlan, setTaxPlan] = useState({ total_claimed: 0, total_remaining: 0, categories: [] });
       const [taxPlanStatus, setTaxPlanStatus] = useState('Ready');
@@ -146,7 +164,7 @@
       const authenticated = Boolean(accountName);
       const confirmed = receipts.filter(r => r.confirmed);
       const pending = receipts.filter(r => !r.confirmed);
-      const claims = useMemo(() => calculateClaimTotals(confirmed), [confirmed]);
+      const claims = useMemo(() => calculateClaimTotals(confirmed), [confirmed, taxCategories]);
       const duplicates = useMemo(() => duplicateGroups(confirmed), [confirmed]);
       const pendingReviewCount = pending.filter(r => r.needsReview || !r.amount || r.amount < MIN_RECEIPT_AMOUNT || r.amount > MAX_RECEIPT_AMOUNT || !r.categoryKey).length;
       const visibleReceipts = useMemo(() => {
@@ -160,7 +178,7 @@
           if (filters.to && r.receiptDate > filters.to) return false;
           return true;
         });
-      }, [confirmed, filters]);
+      }, [confirmed, filters, taxCategories]);
 
       useEffect(() => {
         if (window.lucide) window.lucide.createIcons();
@@ -182,6 +200,7 @@
       }, [taxRebateAmount]);
 
       useEffect(() => {
+        loadCategories();
         restoreSession();
       }, []);
 
@@ -205,6 +224,26 @@
 
       function setAuthenticated(nextAccount) {
         setAccountName(nextAccount);
+      }
+
+      async function loadCategories() {
+        try {
+          const resp = await fetch('/categories');
+          const data = await readJson(resp);
+          if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+          const categories = (data.categories || []).map(cat => ({
+            ...cat,
+            limit: cat.limit === null || cat.limit === undefined ? Infinity : Number(cat.limit),
+            keywords: cat.keywords || [],
+          })).filter(cat => cat.key && cat.label);
+          if (categories.length) {
+            TAX_RELIEF_CATEGORIES = categories;
+            setTaxCategories(categories);
+          }
+        } catch {
+          TAX_RELIEF_CATEGORIES = DEFAULT_TAX_RELIEF_CATEGORIES;
+          setTaxCategories(DEFAULT_TAX_RELIEF_CATEGORIES);
+        }
       }
 
       async function clearAuthenticated() {
@@ -318,8 +357,8 @@
         setReceipts(items => items.map(r => r.id === id ? { ...r, ...changes } : r));
       }
 
-      function validatePending(ids) {
-        const invalid = receipts.find(r => ids.includes(r.id) && !r.confirmed && (!r.amount || r.amount < MIN_RECEIPT_AMOUNT || r.amount > MAX_RECEIPT_AMOUNT || !r.categoryKey));
+      function validatePending(ids, source = receipts) {
+        const invalid = source.find(r => ids.includes(r.id) && !r.confirmed && (!r.amount || r.amount < MIN_RECEIPT_AMOUNT || r.amount > MAX_RECEIPT_AMOUNT || !r.categoryKey));
         if (invalid) {
           const node = document.querySelector(`[data-pending-card="${invalid.id}"]`);
           node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -347,13 +386,60 @@
         };
       }
 
+      async function refineReceiptsWithAi(sourceReceipts, message) {
+        if (ocrConfig.provider !== 'google_vision' || !sourceReceipts.some(r => (r.rawText || '').trim())) {
+          return sourceReceipts;
+        }
+
+        setToast(message);
+        const parseResp = await fetch('/receipts/parse-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            receipts: sourceReceipts.map(r => ({
+              id: r.id,
+              title: r.title || '',
+              receiptDate: r.receiptDate || '',
+              amount: Number(r.amount || 0),
+              categoryKey: r.categoryKey || '',
+              rawText: r.rawText || '',
+            })),
+          }),
+        });
+        const parseData = await readJson(parseResp);
+        if (!parseResp.ok) {
+          setToast(parseData.detail || 'Gemini parsing failed. Review receipts manually.');
+          return sourceReceipts;
+        }
+
+        const parsedById = new Map((parseData.receipts || []).map(item => [item.id, item]));
+        const refined = sourceReceipts.map(r => {
+          const parsed = parsedById.get(r.id);
+          if (!parsed) return r;
+          return {
+            ...r,
+            title: parsed.title || r.title,
+            receiptDate: parsed.receiptDate || r.receiptDate,
+            amount: Number(parsed.amount || r.amount || 0),
+            categoryKey: parsed.categoryKey || r.categoryKey,
+            needsReview: Boolean(parsed.needsReview || !parsed.amount || !parsed.categoryKey || (parsed.confidence || 0) < 0.7),
+            extractionMessage: parsed.message || r.extractionMessage || '',
+            extractionProvider: parsed.provider || r.extractionProvider,
+          };
+        });
+        setReceipts(items => items.map(item => refined.find(r => r.id === item.id) || item));
+        return refined;
+      }
+
       async function confirmReceipt(id) {
-        if (savingIds.includes(id) || !validatePending([id])) return;
+        if (savingIds.includes(id)) return;
         const r = receipts.find(item => item.id === id);
         if (!r) return;
-        const payload = receiptPayload(r);
         setSavingIds(ids => [...ids, id]);
         try {
+          const refinedReceipt = (await refineReceiptsWithAi([r], 'Auto-filling category with Gemini...'))[0];
+          if (!validatePending([id], [refinedReceipt])) return;
+          const payload = receiptPayload(refinedReceipt);
           const resp = await fetch('/receipts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -382,11 +468,13 @@
 
       async function saveAllPending() {
         const ids = pending.map(r => r.id);
-        if (!ids.length || savingAll || !validatePending(ids)) return;
-        const payloads = pending.map(receiptPayload);
+        if (!ids.length || savingAll) return;
         setSavingAll(true);
         setSavingIds(ids);
         try {
+          const receiptsToSave = await refineReceiptsWithAi(pending, 'Auto-filling categories with one Gemini batch request...');
+          if (!validatePending(ids, receiptsToSave)) return;
+          const payloads = receiptsToSave.map(receiptPayload);
           const resp = await fetch('/receipts/batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -396,7 +484,7 @@
           if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
           const saved = data.receipts || [];
           setReceipts(items => items.map(item => {
-            const index = pending.findIndex(r => r.id === item.id);
+            const index = receiptsToSave.findIndex(r => r.id === item.id);
             if (index === -1) return item;
             const payload = payloads[index];
             return {
@@ -430,14 +518,16 @@
           });
           const data = await readJson(resp);
           if (!resp.ok) throw new Error(data.detail || `Server responded with ${resp.status}`);
+          const guessedCategoryKey = guessCategoryKey(`${data.title || ''} ${data.rawText || ''} ${receipt.filename || ''}`);
           updateReceipt(receipt.id, {
             title: data.title || receipt.title,
             receiptDate: data.receiptDate || receipt.receiptDate,
             amount: Number(data.amount || receipt.amount || 0),
-            categoryKey: data.categoryKey || receipt.categoryKey,
-            needsReview: Boolean(data.needsReview || !data.amount || !data.categoryKey || (data.confidence || 0) < 0.7),
+            categoryKey: data.categoryKey || receipt.categoryKey || guessedCategoryKey,
+            needsReview: Boolean(data.needsReview || !data.amount || !(data.categoryKey || receipt.categoryKey || guessedCategoryKey) || (data.confidence || 0) < 0.7),
             extractionMessage: data.message || '',
             extractionProvider: data.provider || ocrConfig.provider,
+            rawText: data.rawText || receipt.rawText || '',
           });
         } catch {
           updateReceipt(receipt.id, { needsReview: true, extractionMessage: 'Receipt extraction failed. Fill in the fields manually.' });
@@ -458,10 +548,11 @@
                 receiptDate: '',
                 imageDataUrl: event.target.result,
                 filename: file.name,
-                categoryKey: '',
+                categoryKey: guessCategoryKey(file.name),
                 amount: 0,
                 confirmed: false,
                 needsReview: true,
+                rawText: '',
               };
               setReceipts(items => [...items, receipt]);
               setView('upload');
@@ -939,7 +1030,13 @@
             {Number(receipt.amount || 0) > 0 && receipt.amount < MIN_RECEIPT_AMOUNT ? <p className="receipt-note warning">Amount must be at least RM 0.01.</p> : null}
             {receipt.amount > MAX_RECEIPT_AMOUNT ? <p className="receipt-note warning">Amount must be {fmt(MAX_RECEIPT_AMOUNT)} or less.</p> : null}
             <div className="field-grid">
-              <div className="field"><label>Title</label><input value={receipt.title || ''} onChange={e => updateReceipt(receipt.id, { title: e.target.value })} placeholder="Optional" /></div>
+              <div className="field"><label>Title</label><input value={receipt.title || ''} onChange={e => {
+                const title = e.target.value;
+                updateReceipt(receipt.id, {
+                  title,
+                  categoryKey: receipt.categoryKey || guessCategoryKey(`${title} ${receipt.filename || ''}`),
+                });
+              }} placeholder="Optional" /></div>
               <div className="field"><label>Date</label><input value={receipt.receiptDate || ''} onChange={e => updateReceipt(receipt.id, { receiptDate: e.target.value })} type="date" /></div>
               <div className="field"><label>Amount</label><input className={amountInvalid ? 'input-error' : ''} value={receipt.amount || ''} onChange={e => updateReceipt(receipt.id, { amount: parseFloat(e.target.value) || 0 })} type="number" min={MIN_RECEIPT_AMOUNT} max={MAX_RECEIPT_AMOUNT} step="0.01" placeholder="0.00" /></div>
               <div className="field"><label>Category</label><select className={categoryInvalid ? 'input-error' : ''} value={receipt.categoryKey || ''} onChange={e => updateReceipt(receipt.id, { categoryKey: e.target.value })}><option value="">Select category</option>{TAX_RELIEF_CATEGORIES.map(cat => <option key={cat.key} value={cat.key}>{cat.label} ({cat.limit === Infinity ? 'no limit' : fmt(cat.limit)})</option>)}</select></div>

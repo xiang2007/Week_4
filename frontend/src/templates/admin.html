@@ -268,6 +268,61 @@
       box-shadow: var(--shadow-sm);
     }
 
+    .log-panel {
+      margin-bottom: 1.25rem;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.8rem;
+      flex-wrap: wrap;
+    }
+
+    .section-head h2 {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      letter-spacing: 0;
+    }
+
+    .event-status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 72px;
+      padding: 0.28rem 0.5rem;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .event-status.success {
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .event-status.warning {
+      background: #FFF7D6;
+      color: #8A5A00;
+    }
+
+    .event-status.error {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .event-details {
+      max-width: 340px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--ink-soft);
+    }
+
     .reset-panel {
       display: none;
       margin-bottom: 1.25rem;
@@ -416,6 +471,32 @@
         </form>
       </div>
 
+      <section class="log-panel">
+        <div class="section-head">
+          <div>
+            <h2>AI/OCR Event Log</h2>
+            <div class="count" id="event-count">Loading events...</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Provider</th>
+                <th>Operation</th>
+                <th>HTTP</th>
+                <th>Account</th>
+                <th>Message</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="events-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -444,6 +525,8 @@
     const errorEl = document.getElementById('admin-error');
     const statusEl = document.getElementById('admin-status');
     const accountsBody = document.getElementById('accounts-body');
+    const eventsBody = document.getElementById('events-body');
+    const eventCount = document.getElementById('event-count');
     const accountCount = document.getElementById('account-count');
     const refreshBtn = document.getElementById('refresh-btn');
     const logoutBtn = document.getElementById('logout-btn');
@@ -489,7 +572,9 @@
       state.authenticated = false;
       document.body.classList.remove('admin-authenticated');
       accountsBody.innerHTML = '';
+      eventsBody.innerHTML = '';
       accountCount.textContent = 'Login required';
+      eventCount.textContent = 'Login required';
       passwordInput.value = '';
       resetForm.reset();
       resetPanel.classList.remove('active');
@@ -529,11 +614,57 @@
       }
     }
 
+    function cell(text, className = '') {
+      const td = document.createElement('td');
+      td.textContent = text || '-';
+      if (className) td.className = className;
+      return td;
+    }
+
+    function renderAiEvents(events) {
+      eventsBody.innerHTML = '';
+      eventCount.textContent = `${events.length} latest event(s)`;
+
+      if (events.length === 0) {
+        const row = document.createElement('tr');
+        const empty = cell('No AI/OCR events recorded yet.', 'password-note');
+        empty.colSpan = 8;
+        row.appendChild(empty);
+        eventsBody.appendChild(row);
+        return;
+      }
+
+      for (const event of events) {
+        const row = document.createElement('tr');
+        row.appendChild(cell((event.created_at || '').replace('T', ' '), 'mono'));
+
+        const statusCell = document.createElement('td');
+        const status = document.createElement('span');
+        status.className = `event-status ${event.status || 'error'}`;
+        status.textContent = event.status || 'error';
+        statusCell.appendChild(status);
+        row.appendChild(statusCell);
+
+        row.appendChild(cell(event.provider, 'mono'));
+        row.appendChild(cell(event.operation, 'mono'));
+        row.appendChild(cell(event.http_status ? String(event.http_status) : '-', 'mono'));
+        row.appendChild(cell(event.account_name || '-', 'mono'));
+        row.appendChild(cell(event.message || '-'));
+
+        const details = cell(event.details || '-', 'event-details');
+        details.title = event.details || '';
+        row.appendChild(details);
+        eventsBody.appendChild(row);
+      }
+    }
+
     async function loadAccounts() {
       accountCount.textContent = 'Loading accounts...';
-      const [accountsResp, insightsResp] = await Promise.all([
+      eventCount.textContent = 'Loading events...';
+      const [accountsResp, insightsResp, eventsResp] = await Promise.all([
         fetch('/admin/accounts'),
         fetch('/admin/insights'),
+        fetch('/admin/ai-events'),
       ]);
       const data = await accountsResp.json();
 
@@ -548,6 +679,12 @@
         insightReceipts.textContent = String(insights.receipt_count || 0);
         insightLatest.textContent = insights.newest_upload ? insights.newest_upload.slice(0, 10) : '-';
         insightCategory.textContent = (insights.top_categories || [])[0]?.category || '-';
+      }
+      if (eventsResp.ok) {
+        const eventData = await eventsResp.json();
+        renderAiEvents(eventData.events || []);
+      } else {
+        eventCount.textContent = 'Failed to load events';
       }
     }
 

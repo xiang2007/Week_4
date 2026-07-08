@@ -234,6 +234,20 @@ async def admin_insights(request: Request):
     return response_data(resp)
 
 
+@app.get("/admin/ai-events")
+async def admin_ai_events(request: Request):
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.get(
+            f"{BACKEND_URL}/admin/ai-events",
+            headers=session_headers(request, admin=True) or None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load AI event logs"))
+
+    return response_data(resp)
+
+
 @app.post("/admin/accounts/reset-password")
 async def admin_reset_password(request: Request):
     data = await request.json()
@@ -274,6 +288,17 @@ async def ocr_config(request: Request):
 
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load OCR settings"))
+
+    return response_data(resp)
+
+
+@app.get("/categories")
+async def categories():
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.get(f"{BACKEND_URL}/categories")
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load categories"))
 
     return response_data(resp)
 
@@ -355,6 +380,23 @@ async def extract_receipt(request: Request):
 
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to extract receipt"))
+
+    return response_data(resp)
+
+
+@app.post("/receipts/parse-batch")
+async def parse_receipts_batch(request: Request):
+    data = await request.json()
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.post(
+            f"{BACKEND_URL}/receipts/parse-batch",
+            json=data,
+            headers=session_headers(request) or None,
+            timeout=40,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to parse receipts"))
 
     return response_data(resp)
 
