@@ -607,6 +607,22 @@
         }
       }
 
+      function autoCategorizePendingReceipts() {
+        let updatedCount = 0;
+        setReceipts(items => items.map(receipt => {
+          if (receipt.confirmed || receipt.categoryKey) return receipt;
+          const categoryKey = guessCategoryKey(`${receipt.title || ''} ${receipt.rawText || ''} ${receipt.filename || ''}`);
+          if (!categoryKey) return receipt;
+          updatedCount += 1;
+          return {
+            ...receipt,
+            categoryKey,
+            needsReview: Boolean(!receipt.amount || !receipt.receiptDate),
+          };
+        }));
+        setToast(updatedCount ? `Auto-categorized ${updatedCount} receipt${updatedCount === 1 ? '' : 's'}.` : 'No category matches found.');
+      }
+
       function handleFiles(files) {
         [...files].forEach(file => {
           if (!file.type.startsWith('image/')) return;
@@ -780,6 +796,7 @@
                 confirmReceipt={confirmReceipt}
                 saveAllPending={saveAllPending}
                 rescanPendingReceipts={rescanPendingReceipts}
+                autoCategorizePendingReceipts={autoCategorizePendingReceipts}
                 handleFiles={handleFiles}
                 openPreview={setPreview}
                 showDashboard={() => setView('dashboard')}
@@ -1045,7 +1062,7 @@
       );
     }
 
-    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, rescanPendingReceipts, handleFiles, openPreview, showDashboard }) {
+    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, rescanPendingReceipts, autoCategorizePendingReceipts, handleFiles, openPreview, showDashboard }) {
       const fileRef = useRef(null);
       const [dragging, setDragging] = useState(false);
       const scanningAll = pending.length > 0 && pending.every(r => extractingIds.includes(r.id));
@@ -1085,6 +1102,7 @@
           </div>
           {pending.length ? <div className="pending-actions">
             <button className="btn btn-outline" disabled={!ocrEnabled || !ocrConfig.enabled || !canRescan || scanningAll} onClick={rescanPendingReceipts} type="button">{scanningAll ? 'Rescanning...' : 'Rescan receipts'}</button>
+            <button className="btn btn-outline" onClick={autoCategorizePendingReceipts} type="button">Auto-categorize</button>
             <button className="btn btn-primary" disabled={savingAll} onClick={saveAllPending} type="button">{savingAll ? 'Saving all...' : 'Save all receipts'}</button>
           </div> : null}
         </section>
