@@ -1064,6 +1064,7 @@
 
     function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, rescanPendingReceipts, autoCategorizePendingReceipts, handleFiles, openPreview, showDashboard }) {
       const fileRef = useRef(null);
+      const cameraRef = useRef(null);
       const [dragging, setDragging] = useState(false);
       const scanningAll = pending.length > 0 && pending.every(r => extractingIds.includes(r.id));
       const canRescan = pending.some(r => r.imageDataUrl && !extractingIds.includes(r.id));
@@ -1083,6 +1084,10 @@
               </span>
             </label>
           </div>
+          <div className="capture-actions">
+            <button className="btn btn-primary" onClick={() => cameraRef.current.click()} type="button"><Icon name="camera" /> Take photo</button>
+            <button className="btn btn-outline" onClick={() => fileRef.current.click()} type="button"><Icon name="image-plus" /> Choose images</button>
+          </div>
           <div
             className={`dropzone ${dragging ? 'dragover' : ''}`}
             onClick={() => fileRef.current.click()}
@@ -1094,6 +1099,7 @@
             <strong>Add receipt images</strong>
             <span>PNG or JPG files</span>
           </div>
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
           <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" multiple hidden onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
           <div className="pending-list">
             {pending.length ? pending.map(r => (

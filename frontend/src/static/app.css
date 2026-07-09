@@ -1093,6 +1093,13 @@ body.authenticated .app-shell {
   font: 600 0.84rem var(--font-body);
 }
 
+.capture-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
 .dropzone strong {
   color: var(--ink);
   font-family: var(--font-display);
@@ -1380,6 +1387,10 @@ body.authenticated:not(.uploading) .advisor-chat {
     max-width: 560px;
   }
 
+  .receipt-thumb {
+    height: min(62vw, 360px);
+  }
+
 }
 
 @media (max-width: 640px) {
@@ -1402,8 +1413,54 @@ body.authenticated:not(.uploading) .advisor-chat {
 
   .dashboard-head .btn,
   .upload-head .btn,
+  .capture-actions .btn,
   .pending-actions .btn {
     width: 100%;
+  }
+
+  .upload-section {
+    padding-bottom: 5.25rem;
+  }
+
+  .upload-options {
+    padding: 0.75rem;
+  }
+
+  .toggle-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+
+  .capture-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .dropzone {
+    min-height: 142px;
+    padding: 1rem;
+  }
+
+  .dropzone strong {
+    font-size: 1.05rem;
+  }
+
+  .receipt-card {
+    gap: 0.8rem;
+    padding: 0.75rem;
+  }
+
+  .receipt-thumb {
+    height: min(70vw, 320px);
+  }
+
+  .receipt-fields {
+    gap: 0.75rem;
+  }
+
+  .action-row,
+  .pending-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .dashboard-tools {
