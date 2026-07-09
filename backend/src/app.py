@@ -525,6 +525,58 @@ def insert_receipt_row(row: dict) -> dict:
     return rows[0] if isinstance(rows, list) and rows else {"id": None, "title": row["title"], "receipt_date": row["receipt_date"]}
 
 
+def insert_receipt_rows(rows: list[dict]) -> list[dict]:
+    if not rows:
+        return []
+
+    if not SUPABASE_DB_ENABLED:
+        account_name = rows[0]["account_name"]
+        init_user_db(account_name)
+        saved_rows: list[dict] = []
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            for row in rows:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO receipts (
+                        receipt_number, amount, category_key, title, receipt_date, filename,
+                        image_data_url, image_storage_path, ocr_provider, ocr_raw_text,
+                        ocr_confidence, ocr_message, ocr_needs_review
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["receipt_number"],
+                        row["amount"],
+                        row["category_key"],
+                        row["title"],
+                        row["receipt_date"],
+                        row["filename"],
+                        row["image_data_url"],
+                        row["image_storage_path"],
+                        row["ocr_provider"],
+                        row["ocr_raw_text"],
+                        row["ocr_confidence"],
+                        row["ocr_message"],
+                        None if row["ocr_needs_review"] is None else (1 if row["ocr_needs_review"] else 0),
+                    ),
+                )
+                saved_rows.append({"id": cursor.lastrowid, "title": row["title"], "receipt_date": row["receipt_date"]})
+            conn.execute("DELETE FROM ai_summaries WHERE id = 1")
+        return saved_rows
+
+    inserted = supabase_db_request(
+        "POST",
+        "receipts",
+        {"select": "id,title,receipt_date"},
+        rows,
+        prefer="return=representation",
+    )
+    clear_ai_summary_cache(rows[0]["account_name"])
+    if isinstance(inserted, list) and inserted:
+        return inserted
+    return [{"id": None, "title": row["title"], "receipt_date": row["receipt_date"]} for row in rows]
+
+
 def delete_receipt_row(account_name: str, receipt_id: int) -> Optional[dict]:
     if not SUPABASE_DB_ENABLED:
         init_user_db(account_name)
@@ -2094,7 +2146,7 @@ def create_backend() -> FastAPI:
             if receipt.categoryKey not in TAX_RELIEF_CATEGORIES:
                 raise HTTPException(status_code=400, detail="Unknown category")
 
-        saved = []
+        rows_to_insert = []
         counts = receipt_counts_by_category(account_name)
         for receipt in payload.receipts:
             counts[receipt.categoryKey] = counts.get(receipt.categoryKey, 0) + 1
@@ -2108,7 +2160,7 @@ def create_backend() -> FastAPI:
                 receipt_date,
             )
             image_data_url = None if image_storage_path else receipt.imageDataUrl
-            saved_row = insert_receipt_row(
+            rows_to_insert.append(
                 receipt_to_db_row(
                     account_name,
                     receipt.receiptNumber,
@@ -2126,7 +2178,7 @@ def create_backend() -> FastAPI:
                     receipt.needsReview,
                 )
             )
-            saved.append({"id": saved_row["id"], "title": saved_row["title"], "receipt_date": saved_row["receipt_date"]})
+        saved = insert_receipt_rows(rows_to_insert)
 
         return {"receipts": saved}
 
