@@ -781,6 +781,121 @@ body.authenticated .app-shell {
   gap: 0.7rem;
 }
 
+.tax-result-card {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(21, 111, 103, 0.2);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(232, 247, 241, 0.96), rgba(255, 255, 255, 0.98) 48%),
+    var(--surface);
+}
+
+.tax-result-head,
+.tax-result-foot,
+.tax-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tax-result-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.tax-result-head > span {
+  padding: 0.35rem 0.65rem;
+  border: 1px solid rgba(21, 111, 103, 0.18);
+  border-radius: 999px;
+  color: var(--brand-deep);
+  background: rgba(255, 255, 255, 0.78);
+  font: 800 0.72rem var(--font-body);
+}
+
+.tax-result-total {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand-deep), #1D8A74);
+}
+
+.tax-result-total span,
+.tax-result-total small {
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 700;
+}
+
+.tax-result-total strong {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  line-height: 1;
+}
+
+.tax-summary-table {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.tax-summary-row {
+  min-height: 48px;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.tax-summary-row:last-child {
+  border-bottom: 0;
+}
+
+.tax-summary-row span {
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.tax-summary-row strong,
+.tax-result-foot strong {
+  font: 800 0.95rem var(--font-mono);
+  white-space: nowrap;
+}
+
+.tax-summary-row.deduct strong {
+  color: var(--brand-deep);
+}
+
+.tax-summary-row.strong {
+  background: rgba(21, 111, 103, 0.06);
+}
+
+.tax-summary-row.strong strong {
+  color: var(--brand-deep);
+}
+
+.tax-summary-row.payable {
+  background: var(--ink);
+  color: #fff;
+}
+
+.tax-summary-row.payable span,
+.tax-summary-row.payable strong {
+  color: #fff;
+}
+
+.tax-result-foot {
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink-soft);
+  font-weight: 800;
+}
+
 .claimed-category-row {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto;
@@ -1554,6 +1669,17 @@ body.authenticated:not(.uploading) .advisor-chat {
 
   .metric-card {
     min-height: 108px;
+  }
+
+  .tax-result-head,
+  .tax-result-foot,
+  .tax-summary-row {
+    align-items: flex-start;
+  }
+
+  .tax-summary-row {
+    flex-direction: column;
+    gap: 0.35rem;
   }
 
   .landing-navlinks a:not(.btn) {
