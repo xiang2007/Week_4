@@ -5,6 +5,7 @@ import os
 import re
 import secrets
 import sqlite3
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -50,6 +51,8 @@ SUPABASE_DB_TABLE_PREFIX = os.getenv("SUPABASE_DB_TABLE_PREFIX", "receipt_manage
 if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", SUPABASE_DB_TABLE_PREFIX):
     SUPABASE_DB_TABLE_PREFIX = "receipt_manager"
 CATEGORIES_FILE = Path(os.getenv("CATEGORIES_FILE", str(BASE_DIR / "categories.json")))
+GEMINI_RETRY_ATTEMPTS = max(1, int(os.getenv("GEMINI_RETRY_ATTEMPTS", "3")))
+GEMINI_RETRY_DELAY_SECONDS = max(0.0, float(os.getenv("GEMINI_RETRY_DELAY_SECONDS", "1.5")))
 
 
 def table_name(name: str) -> str:
@@ -67,6 +70,36 @@ def user_db_path(account_name: str) -> Path:
 
 def user_storage_prefix(account_name: str) -> str:
     return sha256(account_name.encode("utf-8")).hexdigest()
+
+
+def gemini_generate_content(body: bytes, timeout: float) -> dict:
+    retryable_status_codes = {429, 500, 503, 504}
+    last_error: Optional[BaseException] = None
+
+    for attempt in range(GEMINI_RETRY_ATTEMPTS):
+        req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code not in retryable_status_codes or attempt == GEMINI_RETRY_ATTEMPTS - 1:
+                raise
+            last_error = exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt == GEMINI_RETRY_ATTEMPTS - 1:
+                raise
+            last_error = exc
+
+        time.sleep(GEMINI_RETRY_DELAY_SECONDS * (attempt + 1))
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Gemini request failed before a response was received.")
 
 
 def init_user_db(account_name: str) -> None:
@@ -1268,16 +1301,8 @@ def generate_gemini_chat(message: str, receipts: list[sqlite3.Row], account_name
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3},
     }).encode("utf-8")
-    req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = gemini_generate_content(body, timeout=12)
         reply = data["candidates"][0]["content"]["parts"][0]["text"].strip()
         log_ai_event("gemini", "ai_chat", "success", "Gemini chat reply completed.", account_name)
         return reply
@@ -1325,16 +1350,8 @@ def generate_gemini_receipt_extract(image_data_url: str, account_name: Optional[
             "response_mime_type": "application/json",
         },
     }).encode("utf-8")
-    req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = gemini_generate_content(body, timeout=20)
         parsed = json.loads(data["candidates"][0]["content"]["parts"][0]["text"])
         category_key = str(parsed.get("categoryKey") or "")
         if category_key and category_key not in TAX_RELIEF_CATEGORIES:
@@ -1398,6 +1415,32 @@ def parse_receipt_text(raw_text: str, provider: str, message: str = "") -> dict:
         amount = max(candidates)
 
     receipt_date = ""
+    month_lookup = {
+        "jan": 1,
+        "january": 1,
+        "feb": 2,
+        "february": 2,
+        "mar": 3,
+        "march": 3,
+        "apr": 4,
+        "april": 4,
+        "may": 5,
+        "jun": 6,
+        "june": 6,
+        "jul": 7,
+        "july": 7,
+        "aug": 8,
+        "august": 8,
+        "sep": 9,
+        "sept": 9,
+        "september": 9,
+        "oct": 10,
+        "october": 10,
+        "nov": 11,
+        "november": 11,
+        "dec": 12,
+        "december": 12,
+    }
     date_patterns = [
         r"\b(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b",
         r"\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](20\d{2})\b",
@@ -1416,18 +1459,58 @@ def parse_receipt_text(raw_text: str, provider: str, message: str = "") -> dict:
             break
         except ValueError:
             continue
+    if not receipt_date:
+        month_pattern = (
+            r"\b("
+            r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+            r"jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+            r")\.?\s+([0-3]?\d),?\s+(20\d{2})\b"
+        )
+        match = re.search(month_pattern, text, flags=re.IGNORECASE)
+        if match:
+            try:
+                parsed_date = date(int(match.group(3)), month_lookup[match.group(1).lower().rstrip(".")], int(match.group(2)))
+                receipt_date = parsed_date.isoformat()
+            except (KeyError, ValueError):
+                receipt_date = ""
+    if not receipt_date:
+        day_month_pattern = (
+            r"\b([0-3]?\d)\s+("
+            r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+            r"jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+            r")\.?,?\s+(20\d{2})\b"
+        )
+        match = re.search(day_month_pattern, text, flags=re.IGNORECASE)
+        if match:
+            try:
+                parsed_date = date(int(match.group(3)), month_lookup[match.group(2).lower().rstrip(".")], int(match.group(1)))
+                receipt_date = parsed_date.isoformat()
+            except (KeyError, ValueError):
+                receipt_date = ""
 
     ignored_title_words = ("tax invoice", "invoice", "receipt", "cash bill")
-    title = ""
-    for line in lines[:6]:
+    title_candidates: list[tuple[int, str]] = []
+    for line in lines[:8]:
         if len(line) < 3:
             continue
+        lowered_line = line.lower()
         if any(word in line.lower() for word in ignored_title_words):
             continue
         if re.search(r"\d{2,}", line):
             continue
-        title = line[:80]
-        break
+        if not re.search(r"[A-Za-z]{3,}", line):
+            continue
+        if lowered_line in {"event", "retail", "cashier", "paid", "over"}:
+            continue
+        score = 0
+        if re.search(r"\b(sdn\s+bhd|berhad|enterprise|trading|store|market|pharmacy|clinic|restaurant)\b", lowered_line):
+            score += 10
+        if all(ord(char) < 128 for char in line):
+            score += 3
+        if len(line) >= 8:
+            score += 2
+        title_candidates.append((score, line[:80]))
+    title = max(title_candidates, default=(0, ""))[1]
 
     category_key = category_from_text(text)
     confidence = 0.35
@@ -1563,15 +1646,8 @@ def parse_gemini_receipt_batch(receipts: list[ReceiptBatchParseItem], account_na
             "response_mime_type": "application/json",
         },
     }).encode("utf-8")
-    req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = gemini_generate_content(body, timeout=30)
         parsed = json.loads(data["candidates"][0]["content"]["parts"][0]["text"])
         parsed_receipts = parsed.get("receipts", []) if isinstance(parsed, dict) else []
         results = []

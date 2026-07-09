@@ -221,8 +221,8 @@ select.input-error {
 
 .category-select-card {
   display: grid;
-  gap: 0.65rem;
-  padding: 0.72rem 0.82rem;
+  gap: 0.78rem;
+  padding: 0.82rem;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: #fff;
@@ -240,6 +240,14 @@ select.input-error {
   gap: 0.65rem;
   align-items: center;
   min-width: 0;
+  padding-bottom: 0.72rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.category-summary-main > div {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
 }
 
 .category-select-card strong {
@@ -247,23 +255,38 @@ select.input-error {
   color: var(--ink);
   font-size: 0.9rem;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .category-select-card span:not(.swatch) {
   display: block;
-  margin-top: 0.15rem;
   color: var(--ink-soft);
   font-size: 0.78rem;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .select-shell {
   position: relative;
 }
 
+.select-shell::after {
+  content: "";
+  position: absolute;
+  right: 0.95rem;
+  top: 50%;
+  width: 0.48rem;
+  height: 0.48rem;
+  border-right: 2px solid var(--ink-soft);
+  border-bottom: 2px solid var(--ink-soft);
+  pointer-events: none;
+  transform: translateY(-65%) rotate(45deg);
+}
+
 .select-shell select {
   appearance: none;
-  padding-right: 2.35rem;
+  min-height: 46px;
+  padding-right: 2.55rem;
   border-color: var(--line);
   background: var(--surface-soft);
   font-weight: 700;
@@ -271,15 +294,6 @@ select.input-error {
 
 .select-shell select:focus {
   background: #fff;
-}
-
-.select-shell [data-lucide] {
-  position: absolute;
-  right: 0.82rem;
-  top: 50%;
-  color: var(--ink-soft);
-  pointer-events: none;
-  transform: translateY(-50%);
 }
 
 .btn {
