@@ -1295,6 +1295,8 @@ def build_advisor_context(message: str, receipts: list[sqlite3.Row]) -> dict:
     )[:5]
 
     return {
+        "currency": "MYR",
+        "currency_display": "RM",
         "receipt_count": len(valid_receipts),
         "total_spent": round(sum(float(row["amount"] or 0) for row in valid_receipts), 2),
         "total_claimable": round(float(summary["total_claimed"] or 0), 2),
@@ -1302,6 +1304,14 @@ def build_advisor_context(message: str, receipts: list[sqlite3.Row]) -> dict:
         "matching_receipts": [receipt_to_advisor_item(row) for row in matched_receipts[:5]],
         "recent_receipts": [receipt_to_advisor_item(row) for row in recent_receipts],
     }
+
+
+def normalize_currency_text(text: str) -> str:
+    normalized = re.sub(r"\b(?:USD|US dollars?|dollars?)\b", "RM", text, flags=re.IGNORECASE)
+    normalized = re.sub(r"\$\s*", "RM ", normalized)
+    normalized = re.sub(r"\bRM\s+RM\b", "RM", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\b(RM\s+[\d,]+(?:\.\d+)?)\s+RM\b", r"\1", normalized, flags=re.IGNORECASE)
+    return normalized
 
 
 def fallback_advisor_reply(message: str, context: dict) -> str:
@@ -1338,11 +1348,12 @@ def generate_gemini_chat(message: str, receipts: list[sqlite3.Row], account_name
     context = build_advisor_context(message, receipts)
     if not GEMINI_API_KEY:
         log_ai_event("gemini", "ai_chat", "warning", "Gemini API key is not set; fallback reply used.", account_name)
-        return fallback_advisor_reply(message, context)
+        return normalize_currency_text(fallback_advisor_reply(message, context))
 
     prompt = (
         "You are a concise personal finance assistant for tax receipt planning. "
         "Use only the compact database context below. Do not assume access to receipts not shown. "
+        "All money amounts are Malaysian Ringgit. Format currency as RM 1,234.56. Never use $, USD, or dollars. "
         "Do not provide legal, investment, or tax filing advice. "
         "Keep the answer under 70 words and give practical next steps. "
         "Return plain text only. Do not use Markdown, bold markers, bullets, numbered lists, or headings.\n"
@@ -1357,7 +1368,7 @@ def generate_gemini_chat(message: str, receipts: list[sqlite3.Row], account_name
         data = gemini_generate_content(body, timeout=12)
         reply = data["candidates"][0]["content"]["parts"][0]["text"].strip()
         log_ai_event("gemini", "ai_chat", "success", "Gemini chat reply completed.", account_name)
-        return reply
+        return normalize_currency_text(reply)
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:2000]
         message_text = f"Gemini chat HTTP {exc.code}."
