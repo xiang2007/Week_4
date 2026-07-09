@@ -383,6 +383,11 @@
           categoryKey: r.categoryKey,
           filename: r.filename,
           imageDataUrl: r.imageDataUrl,
+          rawText: r.rawText || '',
+          extractionProvider: r.extractionProvider || '',
+          extractionConfidence: r.extractionConfidence == null ? null : Number(r.extractionConfidence || 0),
+          extractionMessage: r.extractionMessage || '',
+          needsReview: Boolean(r.needsReview),
         };
       }
 
@@ -425,6 +430,7 @@
             needsReview: Boolean(parsed.needsReview || !parsed.amount || !parsed.categoryKey || (parsed.confidence || 0) < 0.7),
             extractionMessage: parsed.message || r.extractionMessage || '',
             extractionProvider: parsed.provider || r.extractionProvider,
+            extractionConfidence: Number(parsed.confidence || r.extractionConfidence || 0),
           };
         });
         setReceipts(items => items.map(item => refined.find(r => r.id === item.id) || item));
@@ -456,6 +462,7 @@
           needsReview: refinedReceipt.needsReview,
           message: refinedReceipt.extractionMessage || extractedData.message || '',
           provider: refinedReceipt.extractionProvider || extractedData.provider || 'google_vision',
+          confidence: Number(refinedReceipt.extractionConfidence || extractedData.confidence || 0),
           rawText,
         };
       }
@@ -559,6 +566,7 @@
           needsReview: Boolean(extractedData.needsReview || !extractedData.amount || !(extractedData.categoryKey || receipt.categoryKey || guessedCategoryKey) || (extractedData.confidence || 0) < 0.7),
           extractionMessage: extractedData.message || '',
           extractionProvider: extractedData.provider || ocrConfig.provider,
+          extractionConfidence: Number(extractedData.confidence || receipt.extractionConfidence || 0),
           rawText: extractedData.rawText || receipt.rawText || '',
         };
       }

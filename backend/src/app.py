@@ -44,7 +44,16 @@ SUPABASE_SECRET_KEY = (
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "receipt-images").strip()
 SUPABASE_SIGNED_URL_SECONDS = int(os.getenv("SUPABASE_SIGNED_URL_SECONDS", "3600"))
 SUPABASE_STORAGE_ENABLED = bool(SUPABASE_URL and SUPABASE_SECRET_KEY and SUPABASE_STORAGE_BUCKET)
+SUPABASE_DB_REQUESTED = os.getenv("SUPABASE_DB_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+SUPABASE_DB_ENABLED = bool(SUPABASE_DB_REQUESTED and SUPABASE_URL and SUPABASE_SECRET_KEY)
+SUPABASE_DB_TABLE_PREFIX = os.getenv("SUPABASE_DB_TABLE_PREFIX", "receipt_manager").strip().strip("_") or "receipt_manager"
+if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", SUPABASE_DB_TABLE_PREFIX):
+    SUPABASE_DB_TABLE_PREFIX = "receipt_manager"
 CATEGORIES_FILE = Path(os.getenv("CATEGORIES_FILE", str(BASE_DIR / "categories.json")))
+
+
+def table_name(name: str) -> str:
+    return f"{SUPABASE_DB_TABLE_PREFIX}_{name}"
 
 
 def hash_password(password: str) -> str:
@@ -61,6 +70,8 @@ def user_storage_prefix(account_name: str) -> str:
 
 
 def init_user_db(account_name: str) -> None:
+    if SUPABASE_DB_ENABLED:
+        return
     with sqlite3.connect(user_db_path(account_name)) as conn:
         conn.execute(
             """
@@ -74,6 +85,11 @@ def init_user_db(account_name: str) -> None:
                 filename TEXT,
                 image_data_url TEXT,
                 image_storage_path TEXT,
+                ocr_provider TEXT,
+                ocr_raw_text TEXT,
+                ocr_confidence REAL,
+                ocr_message TEXT,
+                ocr_needs_review INTEGER,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -88,6 +104,16 @@ def init_user_db(account_name: str) -> None:
             conn.execute("ALTER TABLE receipts ADD COLUMN receipt_date TEXT")
         if "image_storage_path" not in columns:
             conn.execute("ALTER TABLE receipts ADD COLUMN image_storage_path TEXT")
+        if "ocr_provider" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN ocr_provider TEXT")
+        if "ocr_raw_text" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN ocr_raw_text TEXT")
+        if "ocr_confidence" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN ocr_confidence REAL")
+        if "ocr_message" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN ocr_message TEXT")
+        if "ocr_needs_review" not in columns:
+            conn.execute("ALTER TABLE receipts ADD COLUMN ocr_needs_review INTEGER")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ai_summaries (
@@ -102,6 +128,8 @@ def init_user_db(account_name: str) -> None:
 
 
 def init_accounts_db() -> None:
+    if SUPABASE_DB_ENABLED:
+        return
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(ACCOUNTS_DB) as conn:
         conn.execute(
@@ -142,6 +170,419 @@ def init_accounts_db() -> None:
         )
 
 
+def supabase_db_request(
+    method: str,
+    table: str,
+    query: Optional[dict[str, str]] = None,
+    body: Optional[dict | list[dict]] = None,
+    prefer: Optional[str] = None,
+) -> list[dict] | dict | None:
+    if not SUPABASE_DB_ENABLED:
+        raise RuntimeError("Supabase database is not enabled")
+
+    params = urllib.parse.urlencode(query or {}, doseq=True, safe="(),.*")
+    url = f"{SUPABASE_URL}/rest/v1/{table_name(table)}"
+    if params:
+        url = f"{url}?{params}"
+
+    payload = None if body is None else json.dumps(body).encode("utf-8")
+    headers = {
+        "apikey": SUPABASE_SECRET_KEY,
+        "Authorization": f"Bearer {SUPABASE_SECRET_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+
+    req = urllib.request.Request(url, data=payload, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as exc:
+        body_text = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise HTTPException(status_code=502, detail=f"Supabase database request failed: {body_text or exc.reason}")
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach Supabase database: {exc.reason}")
+
+
+def eq_filter(value: str | int | float) -> str:
+    return f"eq.{value}"
+
+
+def account_row(account_name: str) -> Optional[dict]:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT account_name, password_sha256, user_db, created_at FROM accounts WHERE account_name = ?",
+                (account_name,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    rows = supabase_db_request(
+        "GET",
+        "accounts",
+        {"select": "account_name,password_sha256,user_db,created_at", "account_name": eq_filter(account_name), "limit": "1"},
+    )
+    return rows[0] if isinstance(rows, list) and rows else None
+
+
+def list_account_rows(select: str = "account_name,created_at") -> list[dict]:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            return [
+                dict(row)
+                for row in conn.execute(
+                    f"SELECT {select} FROM accounts ORDER BY created_at DESC, account_name"
+                ).fetchall()
+            ]
+
+    rows = supabase_db_request(
+        "GET",
+        "accounts",
+        {"select": select, "order": "created_at.desc,account_name.asc"},
+    )
+    return rows if isinstance(rows, list) else []
+
+
+def create_account_row(account_name: str, password_sha256: str) -> None:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.execute(
+                "INSERT INTO accounts (account_name, password_sha256, user_db) VALUES (?, ?, ?)",
+                (account_name, password_sha256, str(user_db_path(account_name))),
+            )
+        return
+
+    supabase_db_request(
+        "POST",
+        "accounts",
+        body={
+            "account_name": account_name,
+            "password_sha256": password_sha256,
+            "user_db": str(user_db_path(account_name)),
+        },
+        prefer="return=minimal",
+    )
+
+
+def update_account_password(account_name: str, password_sha256: str) -> bool:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            cursor = conn.execute(
+                "UPDATE accounts SET password_sha256 = ? WHERE account_name = ?",
+                (password_sha256, account_name),
+            )
+            return cursor.rowcount > 0
+
+    rows = supabase_db_request(
+        "PATCH",
+        "accounts",
+        {"account_name": eq_filter(account_name), "select": "account_name"},
+        {"password_sha256": password_sha256},
+        prefer="return=representation",
+    )
+    return isinstance(rows, list) and bool(rows)
+
+
+def insert_ai_event_row(row: dict) -> None:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_events (account_name, provider, operation, status, http_status, message, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row.get("account_name"),
+                    row["provider"],
+                    row["operation"],
+                    row["status"],
+                    row.get("http_status"),
+                    row["message"],
+                    row.get("details"),
+                ),
+            )
+        return
+
+    supabase_db_request("POST", "ai_events", body=row, prefer="return=minimal")
+
+
+def list_ai_event_rows() -> list[dict]:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            return [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT id, account_name, provider, operation, status, http_status, message, details, created_at
+                    FROM ai_events
+                    ORDER BY id DESC
+                    LIMIT 80
+                    """
+                ).fetchall()
+            ]
+
+    rows = supabase_db_request(
+        "GET",
+        "ai_events",
+        {"select": "id,account_name,provider,operation,status,http_status,message,details,created_at", "order": "id.desc", "limit": "80"},
+    )
+    return rows if isinstance(rows, list) else []
+
+
+def insert_session_row(session_id: str, account_name: str, role: str, expires_at: str) -> None:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (session_id, account_name, role, expires_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (session_id, account_name, role, expires_at),
+            )
+        return
+
+    supabase_db_request(
+        "POST",
+        "sessions",
+        body={
+            "session_id": session_id,
+            "account_name": account_name,
+            "role": role,
+            "expires_at": expires_at,
+        },
+        prefer="return=minimal",
+    )
+
+
+def delete_session_row(session_id: str) -> None:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        return
+
+    supabase_db_request(
+        "DELETE",
+        "sessions",
+        {"session_id": eq_filter(session_id)},
+        prefer="return=minimal",
+    )
+
+
+def session_row(session_id: str, role: str) -> Optional[dict]:
+    if not SUPABASE_DB_ENABLED:
+        with sqlite3.connect(ACCOUNTS_DB) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT account_name, expires_at
+                FROM sessions
+                WHERE session_id = ? AND role = ?
+                """,
+                (session_id, role),
+            ).fetchone()
+            return dict(row) if row else None
+
+    rows = supabase_db_request(
+        "GET",
+        "sessions",
+        {
+            "select": "account_name,expires_at",
+            "session_id": eq_filter(session_id),
+            "role": eq_filter(role),
+            "limit": "1",
+        },
+    )
+    return rows[0] if isinstance(rows, list) and rows else None
+
+
+def receipt_to_db_row(account_name: str, receipt_number: str, amount: float, category_key: str, title: str, receipt_date: str, filename: Optional[str], image_data_url: Optional[str], image_storage_path: Optional[str], raw_text: Optional[str], extraction_provider: Optional[str], extraction_confidence: Optional[float], extraction_message: Optional[str], needs_review: Optional[bool]) -> dict:
+    return {
+        "account_name": account_name,
+        "receipt_number": receipt_number,
+        "amount": amount,
+        "category_key": category_key,
+        "title": title,
+        "receipt_date": receipt_date,
+        "filename": filename,
+        "image_data_url": image_data_url,
+        "image_storage_path": image_storage_path,
+        "ocr_provider": normalize_optional_text(extraction_provider),
+        "ocr_raw_text": normalize_optional_text(raw_text),
+        "ocr_confidence": extraction_confidence,
+        "ocr_message": normalize_optional_text(extraction_message),
+        "ocr_needs_review": needs_review,
+    }
+
+
+def list_receipt_rows(account_name: Optional[str] = None, select: str = "*", order: str = "id.asc", limit: Optional[int] = None) -> list[dict]:
+    if not SUPABASE_DB_ENABLED:
+        if not account_name:
+            return []
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT id, receipt_number, amount, category_key, title, receipt_date, filename,
+                       image_data_url, image_storage_path, ocr_provider, ocr_raw_text,
+                       ocr_confidence, ocr_message, ocr_needs_review, created_at
+                FROM receipts
+                ORDER BY id
+                """
+            ).fetchall()
+        return [dict(row) | {"account_name": account_name} for row in rows]
+
+    query = {"select": select, "order": order}
+    if account_name:
+        query["account_name"] = eq_filter(account_name)
+    if limit is not None:
+        query["limit"] = str(limit)
+    rows = supabase_db_request("GET", "receipts", query)
+    return rows if isinstance(rows, list) else []
+
+
+def insert_receipt_row(row: dict) -> dict:
+    if not SUPABASE_DB_ENABLED:
+        account_name = row["account_name"]
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO receipts (
+                    receipt_number, amount, category_key, title, receipt_date, filename,
+                    image_data_url, image_storage_path, ocr_provider, ocr_raw_text,
+                    ocr_confidence, ocr_message, ocr_needs_review
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["receipt_number"],
+                    row["amount"],
+                    row["category_key"],
+                    row["title"],
+                    row["receipt_date"],
+                    row["filename"],
+                    row["image_data_url"],
+                    row["image_storage_path"],
+                    row["ocr_provider"],
+                    row["ocr_raw_text"],
+                    row["ocr_confidence"],
+                    row["ocr_message"],
+                    None if row["ocr_needs_review"] is None else (1 if row["ocr_needs_review"] else 0),
+                ),
+            )
+            conn.execute("DELETE FROM ai_summaries WHERE id = 1")
+            receipt_id = cursor.lastrowid
+        return {"id": receipt_id, "title": row["title"], "receipt_date": row["receipt_date"]}
+
+    rows = supabase_db_request(
+        "POST",
+        "receipts",
+        {"select": "id,title,receipt_date"},
+        row,
+        prefer="return=representation",
+    )
+    clear_ai_summary_cache(row["account_name"])
+    return rows[0] if isinstance(rows, list) and rows else {"id": None, "title": row["title"], "receipt_date": row["receipt_date"]}
+
+
+def delete_receipt_row(account_name: str, receipt_id: int) -> Optional[dict]:
+    if not SUPABASE_DB_ENABLED:
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT image_storage_path FROM receipts WHERE id = ?",
+                (receipt_id,),
+            ).fetchone()
+            cursor = conn.execute("DELETE FROM receipts WHERE id = ?", (receipt_id,))
+            if cursor.rowcount:
+                conn.execute("DELETE FROM ai_summaries WHERE id = 1")
+                return dict(row) if row else {}
+            return None
+
+    rows = supabase_db_request(
+        "DELETE",
+        "receipts",
+        {"account_name": eq_filter(account_name), "id": eq_filter(receipt_id), "select": "image_storage_path"},
+        prefer="return=representation",
+    )
+    if isinstance(rows, list) and rows:
+        clear_ai_summary_cache(account_name)
+        return rows[0]
+    return None
+
+
+def receipt_counts_by_category(account_name: str) -> dict[str, int]:
+    rows = list_receipt_rows(account_name, select="category_key", order="id.asc")
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = row["category_key"]
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def get_ai_summary_cache(account_name: str) -> Optional[dict]:
+    if not SUPABASE_DB_ENABLED:
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT summary_json, receipt_count, receipt_signature, updated_at
+                FROM ai_summaries
+                WHERE id = 1
+                """
+            ).fetchone()
+            return dict(row) if row else None
+
+    rows = supabase_db_request(
+        "GET",
+        "ai_summaries",
+        {"select": "summary_json,receipt_count,receipt_signature,updated_at", "account_name": eq_filter(account_name), "limit": "1"},
+    )
+    return rows[0] if isinstance(rows, list) and rows else None
+
+
+def save_ai_summary_cache(account_name: str, summary: dict, receipt_count: int, signature: str) -> None:
+    if not SUPABASE_DB_ENABLED:
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_summaries (id, summary_json, receipt_count, receipt_signature, updated_at)
+                VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    summary_json = excluded.summary_json,
+                    receipt_count = excluded.receipt_count,
+                    receipt_signature = excluded.receipt_signature,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (json.dumps(summary), receipt_count, signature),
+            )
+        return
+
+    supabase_db_request(
+        "POST",
+        "ai_summaries",
+        body={
+            "account_name": account_name,
+            "summary_json": summary,
+            "receipt_count": receipt_count,
+            "receipt_signature": signature,
+            "updated_at": utc_now().isoformat(),
+        },
+        query={"on_conflict": "account_name"},
+        prefer="resolution=merge-duplicates,return=minimal",
+    )
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -165,70 +606,49 @@ def log_ai_event(
         details_text = str(details)[:4000]
 
     try:
-        with sqlite3.connect(ACCOUNTS_DB) as conn:
-            conn.execute(
-                """
-                INSERT INTO ai_events (account_name, provider, operation, status, http_status, message, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    account_name,
-                    provider,
-                    operation,
-                    status,
-                    http_status,
-                    message[:500],
-                    details_text,
-                ),
-            )
-    except sqlite3.Error:
+        insert_ai_event_row(
+            {
+                "account_name": account_name,
+                "provider": provider,
+                "operation": operation,
+                "status": status,
+                "http_status": http_status,
+                "message": message[:500],
+                "details": details_text,
+            }
+        )
+    except Exception:
         pass
 
 
 def create_session(account_name: str, role: str) -> str:
     session_id = secrets.token_urlsafe(32)
     expires_at = (utc_now() + timedelta(days=SESSION_DAYS)).isoformat()
-    with sqlite3.connect(ACCOUNTS_DB) as conn:
-        conn.execute(
-            """
-            INSERT INTO sessions (session_id, account_name, role, expires_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (session_id, account_name, role, expires_at),
-        )
+    insert_session_row(session_id, account_name, role, expires_at)
     return session_id
 
 
 def delete_session(session_id: Optional[str]) -> None:
     if not session_id:
         return
-    with sqlite3.connect(ACCOUNTS_DB) as conn:
-        conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+    delete_session_row(session_id)
 
 
 def session_account(session_id: Optional[str], role: str) -> Optional[str]:
     if not session_id:
         return None
-    with sqlite3.connect(ACCOUNTS_DB) as conn:
-        row = conn.execute(
-            """
-            SELECT account_name, expires_at
-            FROM sessions
-            WHERE session_id = ? AND role = ?
-            """,
-            (session_id, role),
-        ).fetchone()
-        if not row:
-            return None
-        try:
-            expires_at = datetime.fromisoformat(row[1])
-        except ValueError:
-            delete_session(session_id)
-            return None
-        if expires_at <= utc_now():
-            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
-            return None
-        return row[0]
+    row = session_row(session_id, role)
+    if not row:
+        return None
+    try:
+        expires_at = datetime.fromisoformat(str(row["expires_at"]).replace("Z", "+00:00"))
+    except ValueError:
+        delete_session(session_id)
+        return None
+    if expires_at <= utc_now():
+        delete_session(session_id)
+        return None
+    return row["account_name"]
 
 
 def set_session_cookie(response: Response, cookie_name: str, session_id: str) -> None:
@@ -379,6 +799,11 @@ class ReceiptCreate(BaseModel):
     receiptDate: Optional[str] = None
     filename: Optional[str] = None
     imageDataUrl: Optional[str] = None
+    rawText: Optional[str] = None
+    extractionProvider: Optional[str] = None
+    extractionConfidence: Optional[float] = None
+    extractionMessage: Optional[str] = None
+    needsReview: Optional[bool] = None
 
 
 class ReceiptBatchCreate(BaseModel):
@@ -1205,8 +1630,36 @@ def generate_receipt_extract(image_data_url: str, account_name: Optional[str] = 
     return generate_gemini_receipt_extract(image_data_url, account_name)
 
 
-def clear_ai_summary_cache(conn: sqlite3.Connection) -> None:
-    conn.execute("DELETE FROM ai_summaries WHERE id = 1")
+def clear_ai_summary_cache(account_name: str) -> None:
+    if not SUPABASE_DB_ENABLED:
+        init_user_db(account_name)
+        with sqlite3.connect(user_db_path(account_name)) as conn:
+            conn.execute("DELETE FROM ai_summaries WHERE id = 1")
+        return
+
+    supabase_db_request(
+        "DELETE",
+        "ai_summaries",
+        {"account_name": eq_filter(account_name)},
+        prefer="return=minimal",
+    )
+
+
+def database_health() -> dict:
+    if SUPABASE_DB_REQUESTED and not SUPABASE_DB_ENABLED:
+        raise HTTPException(status_code=503, detail="Supabase DB is enabled but SUPABASE_URL or SUPABASE_SECRET_KEY is missing")
+
+    if SUPABASE_DB_ENABLED:
+        supabase_db_request(
+            "GET",
+            "accounts",
+            {"select": "account_name", "limit": "1"},
+        )
+        return {"mode": "supabase", "table_prefix": SUPABASE_DB_TABLE_PREFIX}
+
+    init_accounts_db()
+    return {"mode": "sqlite"}
+
 
 def create_backend() -> FastAPI:
     app = FastAPI(title="Backend server")
@@ -1216,6 +1669,10 @@ def create_backend() -> FastAPI:
     async def refresh_category_config(request, call_next):
         refresh_tax_relief_categories()
         return await call_next(request)
+
+    @app.get("/health")
+    async def health():
+        return {"ok": True, "database": database_health()}
 
     @app.post("/process")
     async def process(files: list[UploadFile] = File(...)):
@@ -1243,13 +1700,13 @@ def create_backend() -> FastAPI:
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
 
         init_user_db(account_name)
+        if account_row(account_name):
+            raise HTTPException(status_code=409, detail="Account name already exists")
         try:
-            with sqlite3.connect(ACCOUNTS_DB) as conn:
-                conn.execute(
-                    "INSERT INTO accounts (account_name, password_sha256, user_db) VALUES (?, ?, ?)",
-                    (account_name, hash_password(payload.password), str(user_db_path(account_name))),
-                )
-        except sqlite3.IntegrityError:
+            create_account_row(account_name, hash_password(payload.password))
+        except HTTPException:
+            raise
+        except Exception:
             raise HTTPException(status_code=409, detail="Account name already exists")
 
         session_id = create_session(account_name, "user")
@@ -1259,13 +1716,9 @@ def create_backend() -> FastAPI:
     @app.post("/auth/login")
     async def login(payload: AuthRequest, response: Response):
         account_name = validate_account_name(payload.accountName)
-        with sqlite3.connect(ACCOUNTS_DB) as conn:
-            row = conn.execute(
-                "SELECT password_sha256 FROM accounts WHERE account_name = ?",
-                (account_name,),
-            ).fetchone()
+        row = account_row(account_name)
 
-        if not row or row[0] != hash_password(payload.password):
+        if not row or row["password_sha256"] != hash_password(payload.password):
             raise HTTPException(status_code=401, detail="Invalid account name or password")
 
         init_user_db(account_name)
@@ -1326,15 +1779,7 @@ def create_backend() -> FastAPI:
         receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
     ):
         require_admin(authorization, receipt_manager_admin_session)
-        with sqlite3.connect(ACCOUNTS_DB) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT account_name, created_at
-                FROM accounts
-                ORDER BY created_at DESC, account_name
-                """
-            ).fetchall()
+        rows = list_account_rows("account_name,created_at")
 
         return {
             "accounts": [
@@ -1353,25 +1798,13 @@ def create_backend() -> FastAPI:
         receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
     ):
         require_admin(authorization, receipt_manager_admin_session)
-        with sqlite3.connect(ACCOUNTS_DB) as conn:
-            conn.row_factory = sqlite3.Row
-            accounts = conn.execute(
-                "SELECT account_name, created_at FROM accounts ORDER BY created_at DESC"
-            ).fetchall()
+        accounts = list_account_rows("account_name,created_at")
 
         total_receipts = 0
         category_counts: dict[str, int] = {}
         newest_upload = None
         for account in accounts:
-            path = user_db_path(account["account_name"])
-            if not path.exists():
-                continue
-            init_user_db(account["account_name"])
-            with sqlite3.connect(path) as conn:
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT category_key, created_at FROM receipts ORDER BY created_at DESC"
-                ).fetchall()
+            rows = list_receipt_rows(account["account_name"], select="category_key,created_at", order="created_at.desc")
             total_receipts += len(rows)
             if rows and (newest_upload is None or rows[0]["created_at"] > newest_upload):
                 newest_upload = rows[0]["created_at"]
@@ -1400,16 +1833,7 @@ def create_backend() -> FastAPI:
         receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
     ):
         require_admin(authorization, receipt_manager_admin_session)
-        with sqlite3.connect(ACCOUNTS_DB) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT id, account_name, provider, operation, status, http_status, message, details, created_at
-                FROM ai_events
-                ORDER BY id DESC
-                LIMIT 80
-                """
-            ).fetchall()
+        rows = list_ai_event_rows()
 
         return {
             "events": [
@@ -1428,6 +1852,51 @@ def create_backend() -> FastAPI:
             ]
         }
 
+    @app.get("/admin/ocr-receipts")
+    async def admin_ocr_receipts(
+        authorization: Optional[str] = Header(default=None),
+        receipt_manager_admin_session: Optional[str] = Cookie(default=None, alias=ADMIN_SESSION_COOKIE_NAME),
+    ):
+        require_admin(authorization, receipt_manager_admin_session)
+        accounts = list_account_rows("account_name")
+
+        receipts = []
+        for account in accounts:
+            account_name = account["account_name"]
+            rows = list_receipt_rows(
+                account_name,
+                select=(
+                    "id,receipt_number,amount,category_key,title,receipt_date,filename,"
+                    "image_data_url,image_storage_path,ocr_provider,ocr_raw_text,"
+                    "ocr_confidence,ocr_message,ocr_needs_review,created_at"
+                ),
+                order="created_at.desc,id.desc",
+            )
+            for row in rows:
+                receipts.append(
+                    {
+                        "account_name": account_name,
+                        "id": row["id"],
+                        "receipt_number": row["receipt_number"],
+                        "title": row["title"],
+                        "receipt_date": row["receipt_date"],
+                        "amount": row["amount"],
+                        "category_key": row["category_key"],
+                        "category_label": category_label(row["category_key"]),
+                        "filename": row["filename"],
+                        "image_data_url": signed_receipt_image_url(row["image_storage_path"]) or row["image_data_url"],
+                        "ocr_provider": row["ocr_provider"],
+                        "ocr_raw_text": row["ocr_raw_text"],
+                        "ocr_confidence": row["ocr_confidence"],
+                        "ocr_message": row["ocr_message"],
+                        "ocr_needs_review": bool(row["ocr_needs_review"]) if row["ocr_needs_review"] is not None else None,
+                        "created_at": row["created_at"],
+                    }
+                )
+
+        receipts.sort(key=lambda item: (item["created_at"] or "", item["id"]), reverse=True)
+        return {"receipts": receipts[:200]}
+
     @app.post("/admin/accounts/reset-password")
     async def admin_reset_password(
         payload: AdminPasswordResetRequest,
@@ -1440,17 +1909,7 @@ def create_backend() -> FastAPI:
         if len(payload.newPassword) < 6:
             raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
 
-        with sqlite3.connect(ACCOUNTS_DB) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE accounts
-                SET password_sha256 = ?
-                WHERE account_name = ?
-                """,
-                (hash_password(payload.newPassword), account_name),
-            )
-
-        if cursor.rowcount == 0:
+        if not update_account_password(account_name, hash_password(payload.newPassword)):
             raise HTTPException(status_code=404, detail="Account not found")
 
         return {"updated": True, "account_name": account_name}
@@ -1461,16 +1920,11 @@ def create_backend() -> FastAPI:
         receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
         account_name = require_user(authorization, receipt_manager_session)
-        init_user_db(account_name)
-        with sqlite3.connect(user_db_path(account_name)) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT id, receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, image_storage_path, created_at
-                FROM receipts
-                ORDER BY id
-                """
-            ).fetchall()
+        rows = list_receipt_rows(
+            account_name,
+            select="id,receipt_number,amount,category_key,title,receipt_date,filename,image_data_url,image_storage_path,created_at",
+            order="id.asc",
+        )
 
         return {
             "receipts": [
@@ -1523,42 +1977,32 @@ def create_backend() -> FastAPI:
         if payload.categoryKey not in TAX_RELIEF_CATEGORIES:
             raise HTTPException(status_code=400, detail="Unknown category")
 
-        init_user_db(account_name)
-        with sqlite3.connect(user_db_path(account_name)) as conn:
-            category_count = conn.execute(
-                "SELECT COUNT(*) FROM receipts WHERE category_key = ?",
-                (payload.categoryKey,),
-            ).fetchone()[0]
-            label = category_label(payload.categoryKey)
-            title = normalize_optional_text(payload.title) or f"Receipt {label} {category_count + 1}"
-            receipt_date = normalize_optional_text(payload.receiptDate) or date.today().isoformat()
-            image_storage_path = upload_receipt_image(
+        category_count = receipt_counts_by_category(account_name).get(payload.categoryKey, 0)
+        label = category_label(payload.categoryKey)
+        title = normalize_optional_text(payload.title) or f"Receipt {label} {category_count + 1}"
+        receipt_date = normalize_optional_text(payload.receiptDate) or date.today().isoformat()
+        image_storage_path = upload_receipt_image(account_name, payload.imageDataUrl, title, receipt_date)
+        image_data_url = None if image_storage_path else payload.imageDataUrl
+        saved = insert_receipt_row(
+            receipt_to_db_row(
                 account_name,
-                payload.imageDataUrl,
+                payload.receiptNumber,
+                payload.amount,
+                payload.categoryKey,
                 title,
                 receipt_date,
+                payload.filename,
+                image_data_url,
+                image_storage_path,
+                payload.rawText,
+                payload.extractionProvider,
+                payload.extractionConfidence,
+                payload.extractionMessage,
+                payload.needsReview,
             )
-            image_data_url = None if image_storage_path else payload.imageDataUrl
-            cursor = conn.execute(
-                """
-                INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, image_storage_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    payload.receiptNumber,
-                    payload.amount,
-                    payload.categoryKey,
-                    title,
-                    receipt_date,
-                    payload.filename,
-                    image_data_url,
-                    image_storage_path,
-                ),
-            )
-            clear_ai_summary_cache(conn)
-            receipt_id = cursor.lastrowid
+        )
 
-        return {"id": receipt_id, "title": title, "receipt_date": receipt_date}
+        return {"id": saved["id"], "title": saved["title"], "receipt_date": saved["receipt_date"]}
 
     @app.post("/receipts/batch")
     async def add_receipts_batch(
@@ -1574,45 +2018,39 @@ def create_backend() -> FastAPI:
             if receipt.categoryKey not in TAX_RELIEF_CATEGORIES:
                 raise HTTPException(status_code=400, detail="Unknown category")
 
-        init_user_db(account_name)
         saved = []
-        with sqlite3.connect(user_db_path(account_name)) as conn:
-            counts = {
-                row[0]: row[1]
-                for row in conn.execute(
-                    "SELECT category_key, COUNT(*) FROM receipts GROUP BY category_key"
-                ).fetchall()
-            }
-            for receipt in payload.receipts:
-                counts[receipt.categoryKey] = counts.get(receipt.categoryKey, 0) + 1
-                label = category_label(receipt.categoryKey)
-                title = normalize_optional_text(receipt.title) or f"Receipt {label} {counts[receipt.categoryKey]}"
-                receipt_date = normalize_optional_text(receipt.receiptDate) or date.today().isoformat()
-                image_storage_path = upload_receipt_image(
+        counts = receipt_counts_by_category(account_name)
+        for receipt in payload.receipts:
+            counts[receipt.categoryKey] = counts.get(receipt.categoryKey, 0) + 1
+            label = category_label(receipt.categoryKey)
+            title = normalize_optional_text(receipt.title) or f"Receipt {label} {counts[receipt.categoryKey]}"
+            receipt_date = normalize_optional_text(receipt.receiptDate) or date.today().isoformat()
+            image_storage_path = upload_receipt_image(
+                account_name,
+                receipt.imageDataUrl,
+                title,
+                receipt_date,
+            )
+            image_data_url = None if image_storage_path else receipt.imageDataUrl
+            saved_row = insert_receipt_row(
+                receipt_to_db_row(
                     account_name,
-                    receipt.imageDataUrl,
+                    receipt.receiptNumber,
+                    receipt.amount,
+                    receipt.categoryKey,
                     title,
                     receipt_date,
+                    receipt.filename,
+                    image_data_url,
+                    image_storage_path,
+                    receipt.rawText,
+                    receipt.extractionProvider,
+                    receipt.extractionConfidence,
+                    receipt.extractionMessage,
+                    receipt.needsReview,
                 )
-                image_data_url = None if image_storage_path else receipt.imageDataUrl
-                cursor = conn.execute(
-                    """
-                    INSERT INTO receipts (receipt_number, amount, category_key, title, receipt_date, filename, image_data_url, image_storage_path)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        receipt.receiptNumber,
-                        receipt.amount,
-                        receipt.categoryKey,
-                        title,
-                        receipt_date,
-                        receipt.filename,
-                        image_data_url,
-                        image_storage_path,
-                    ),
-                )
-                saved.append({"id": cursor.lastrowid, "title": title, "receipt_date": receipt_date})
-            clear_ai_summary_cache(conn)
+            )
+            saved.append({"id": saved_row["id"], "title": saved_row["title"], "receipt_date": saved_row["receipt_date"]})
 
         return {"receipts": saved}
 
@@ -1641,22 +2079,9 @@ def create_backend() -> FastAPI:
         receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
         account_name = require_user(authorization, receipt_manager_session)
-        init_user_db(account_name)
+        row = delete_receipt_row(account_name, receipt_id)
 
-        with sqlite3.connect(user_db_path(account_name)) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                "SELECT image_storage_path FROM receipts WHERE id = ?",
-                (receipt_id,),
-            ).fetchone()
-            cursor = conn.execute(
-                "DELETE FROM receipts WHERE id = ?",
-                (receipt_id,),
-            )
-            if cursor.rowcount:
-                clear_ai_summary_cache(conn)
-
-        if cursor.rowcount == 0:
+        if row is None:
             raise HTTPException(status_code=404, detail="Receipt not found")
 
         delete_receipt_image(row["image_storage_path"] if row else None)
@@ -1670,13 +2095,9 @@ def create_backend() -> FastAPI:
     ):
         if authorization or receipt_manager_session:
             account_name = require_user(authorization, receipt_manager_session)
-            init_user_db(account_name)
-            with sqlite3.connect(user_db_path(account_name)) as conn:
-                rows = conn.execute(
-                    "SELECT category_key, amount FROM receipts ORDER BY id"
-                ).fetchall()
+            rows = list_receipt_rows(account_name, select="category_key,amount", order="id.asc")
             return calculate_summary([
-                ReceiptItem(categoryKey=row[0], amount=row[1])
+                ReceiptItem(categoryKey=row["category_key"], amount=row["amount"])
                 for row in rows
             ])
 
@@ -1692,45 +2113,24 @@ def create_backend() -> FastAPI:
         receipt_manager_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
     ):
         account_name = require_user(authorization, receipt_manager_session)
-        init_user_db(account_name)
-        with sqlite3.connect(user_db_path(account_name)) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT id, title, receipt_date, amount, category_key, created_at
-                FROM receipts
-                ORDER BY COALESCE(receipt_date, DATE(created_at)), id
-                """
-            ).fetchall()
-            signature = receipt_signature(rows)
-            cached = conn.execute(
-                """
-                SELECT summary_json, receipt_count, receipt_signature, updated_at
-                FROM ai_summaries
-                WHERE id = 1
-                """
-            ).fetchone()
-            if cached and cached["receipt_count"] == len(rows) and cached["receipt_signature"] == signature:
-                summary = json.loads(cached["summary_json"])
-                summary["cached"] = True
-                summary["updated_at"] = cached["updated_at"]
-                return summary
-
-            summary = fallback_ai_summary(rows)
-            conn.execute(
-                """
-                INSERT INTO ai_summaries (id, summary_json, receipt_count, receipt_signature, updated_at)
-                VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET
-                    summary_json = excluded.summary_json,
-                    receipt_count = excluded.receipt_count,
-                    receipt_signature = excluded.receipt_signature,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (json.dumps(summary), len(rows), signature),
-            )
-            summary["cached"] = False
+        rows = list_receipt_rows(
+            account_name,
+            select="id,title,receipt_date,amount,category_key,created_at",
+            order="receipt_date.asc,id.asc",
+        )
+        signature = receipt_signature(rows)
+        cached = get_ai_summary_cache(account_name)
+        if cached and cached["receipt_count"] == len(rows) and cached["receipt_signature"] == signature:
+            summary_json = cached["summary_json"]
+            summary = summary_json if isinstance(summary_json, dict) else json.loads(summary_json)
+            summary["cached"] = True
+            summary["updated_at"] = cached["updated_at"]
             return summary
+
+        summary = fallback_ai_summary(rows)
+        save_ai_summary_cache(account_name, summary, len(rows), signature)
+        summary["cached"] = False
+        return summary
 
     @app.post("/ai-chat")
     async def ai_chat(
@@ -1743,16 +2143,11 @@ def create_backend() -> FastAPI:
         if not message:
             raise HTTPException(status_code=400, detail="Message required")
 
-        init_user_db(account_name)
-        with sqlite3.connect(user_db_path(account_name)) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT id, title, receipt_date, amount, category_key, created_at
-                FROM receipts
-                ORDER BY COALESCE(receipt_date, DATE(created_at)), id
-                """
-            ).fetchall()
+        rows = list_receipt_rows(
+            account_name,
+            select="id,title,receipt_date,amount,category_key,created_at",
+            order="receipt_date.asc,id.asc",
+        )
 
         return {"reply": generate_gemini_chat(message, rows, account_name)}
 

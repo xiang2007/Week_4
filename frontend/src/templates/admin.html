@@ -323,6 +323,54 @@
       color: var(--ink-soft);
     }
 
+    .ocr-panel {
+      margin-bottom: 1.25rem;
+    }
+
+    .ocr-thumb {
+      width: 58px;
+      height: 58px;
+      object-fit: cover;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-strong);
+    }
+
+    .ocr-text {
+      max-width: 360px;
+      max-height: 84px;
+      overflow: auto;
+      white-space: pre-wrap;
+      color: var(--ink-soft);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .review-flag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      padding: 0.24rem 0.48rem;
+      border-radius: 999px;
+      background: var(--surface-strong);
+      color: var(--ink-soft);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .review-flag.yes {
+      background: #FFF7D6;
+      color: #8A5A00;
+    }
+
+    .review-flag.no {
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
     .reset-panel {
       display: none;
       margin-bottom: 1.25rem;
@@ -471,6 +519,35 @@
         </form>
       </div>
 
+      <section class="ocr-panel">
+        <div class="section-head">
+          <div>
+            <h2>Extracted Receipt Info</h2>
+            <div class="count" id="ocr-count">Loading OCR receipts...</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Image</th>
+                <th>Account</th>
+                <th>Title</th>
+                <th>Date</th>
+                <th>Amount</th>
+                <th>Category</th>
+                <th>Provider</th>
+                <th>Confidence</th>
+                <th>Review</th>
+                <th>Message</th>
+                <th>Raw OCR Text</th>
+              </tr>
+            </thead>
+            <tbody id="ocr-body"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="log-panel">
         <div class="section-head">
           <div>
@@ -526,7 +603,9 @@
     const statusEl = document.getElementById('admin-status');
     const accountsBody = document.getElementById('accounts-body');
     const eventsBody = document.getElementById('events-body');
+    const ocrBody = document.getElementById('ocr-body');
     const eventCount = document.getElementById('event-count');
+    const ocrCount = document.getElementById('ocr-count');
     const accountCount = document.getElementById('account-count');
     const refreshBtn = document.getElementById('refresh-btn');
     const logoutBtn = document.getElementById('logout-btn');
@@ -573,8 +652,10 @@
       document.body.classList.remove('admin-authenticated');
       accountsBody.innerHTML = '';
       eventsBody.innerHTML = '';
+      ocrBody.innerHTML = '';
       accountCount.textContent = 'Login required';
       eventCount.textContent = 'Login required';
+      ocrCount.textContent = 'Login required';
       passwordInput.value = '';
       resetForm.reset();
       resetPanel.classList.remove('active');
@@ -658,13 +739,73 @@
       }
     }
 
+    function renderOcrReceipts(receipts) {
+      ocrBody.innerHTML = '';
+      ocrCount.textContent = `${receipts.length} latest receipt(s)`;
+
+      if (receipts.length === 0) {
+        const row = document.createElement('tr');
+        const empty = cell('No saved OCR receipt data yet.', 'password-note');
+        empty.colSpan = 11;
+        row.appendChild(empty);
+        ocrBody.appendChild(row);
+        return;
+      }
+
+      for (const receipt of receipts) {
+        const row = document.createElement('tr');
+
+        const imageCell = document.createElement('td');
+        if (receipt.image_data_url) {
+          const image = document.createElement('img');
+          image.className = 'ocr-thumb';
+          image.src = receipt.image_data_url;
+          image.alt = '';
+          imageCell.appendChild(image);
+        } else {
+          imageCell.textContent = '-';
+          imageCell.className = 'password-note';
+        }
+        row.appendChild(imageCell);
+
+        row.appendChild(cell(receipt.account_name, 'mono'));
+        row.appendChild(cell(receipt.title || receipt.filename || 'Receipt'));
+        row.appendChild(cell(receipt.receipt_date, 'mono'));
+        row.appendChild(cell(typeof receipt.amount === 'number' ? `RM ${receipt.amount.toFixed(2)}` : '-', 'mono'));
+        row.appendChild(cell(receipt.category_label || receipt.category_key || '-'));
+        row.appendChild(cell(receipt.ocr_provider || 'manual', 'mono'));
+        row.appendChild(cell(typeof receipt.ocr_confidence === 'number' ? `${Math.round(receipt.ocr_confidence * 100)}%` : '-', 'mono'));
+
+        const reviewCell = document.createElement('td');
+        const flag = document.createElement('span');
+        flag.className = `review-flag ${receipt.ocr_needs_review === true ? 'yes' : receipt.ocr_needs_review === false ? 'no' : ''}`;
+        flag.textContent = receipt.ocr_needs_review === true ? 'Yes' : receipt.ocr_needs_review === false ? 'No' : '-';
+        reviewCell.appendChild(flag);
+        row.appendChild(reviewCell);
+
+        row.appendChild(cell(receipt.ocr_message || '-'));
+
+        const rawCell = document.createElement('td');
+        const raw = document.createElement('div');
+        raw.className = 'ocr-text';
+        raw.textContent = receipt.ocr_raw_text || 'No raw OCR text saved for this receipt.';
+        raw.title = receipt.ocr_raw_text || '';
+        rawCell.appendChild(raw);
+        row.appendChild(rawCell);
+
+        ocrBody.appendChild(row);
+      }
+    }
+
     async function loadAccounts() {
       accountCount.textContent = 'Loading accounts...';
       eventCount.textContent = 'Loading events...';
-      const [accountsResp, insightsResp, eventsResp] = await Promise.all([
+      ocrCount.textContent = 'Loading OCR receipts...';
+      const [accountsResp, insightsResp, eventsResp, ocrResp] = await Promise.all([
         fetch('/admin/accounts'),
         fetch('/admin/insights'),
         fetch('/admin/ai-events'),
+        fetch('/admin/ocr-receipts'),
       ]);
       const data = await accountsResp.json();
 
@@ -685,6 +826,12 @@
         renderAiEvents(eventData.events || []);
       } else {
         eventCount.textContent = 'Failed to load events';
+      }
+      if (ocrResp.ok) {
+        const ocrData = await ocrResp.json();
+        renderOcrReceipts(ocrData.receipts || []);
+      } else {
+        ocrCount.textContent = 'Failed to load OCR receipts';
       }
     }
 

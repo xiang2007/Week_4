@@ -2,7 +2,7 @@
 
 This folder contains the FastAPI backend for Receipt Manager.
 
-It handles authentication, SQLite account and receipt storage, optional Supabase receipt image storage, receipt validation, tax-summary calculation, optional Gemini OCR extraction, AI chat responses, admin endpoints, and PDF generation.
+It handles authentication, SQLite or Supabase account/receipt storage, optional Supabase receipt image storage, receipt validation, tax-summary calculation, optional Gemini OCR extraction, AI chat responses, admin endpoints, and PDF generation.
 
 For full setup, Docker, deployment, and evaluation instructions, see the root project README:
 

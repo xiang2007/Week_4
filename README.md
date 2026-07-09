@@ -4,7 +4,7 @@ Receipt Manager is a personal tax relief dashboard for turning receipt photos in
 
 The project is split into two services:
 
-- `backend/`: API, authentication, SQLite storage, OCR/Gemini integration, receipt and tax-summary logic
+- `backend/`: API, authentication, SQLite or Supabase storage, OCR/Gemini integration, receipt and tax-summary logic
 - `frontend/`: FastAPI frontend server that renders the landing page, app dashboard, admin page, and proxies API calls to the backend
 
 ## Product Showcase Summary
@@ -61,7 +61,7 @@ With Docker Compose, `backend/categories.json` is mounted into the backend conta
 | Backend API | FastAPI |
 | Frontend server | FastAPI + Jinja templates |
 | App UI | React via CDN, Lucide icons, custom CSS |
-| Storage | SQLite files under `backend/data/`, optional Supabase Storage for receipt images |
+| Storage | SQLite fallback or Supabase database, optional Supabase Storage for receipt images |
 | OCR / AI | Google Cloud Vision OCR, Gemini API batch parsing/fallback, optional manual mode |
 | PDF export | img2pdf |
 | Runtime | Python 3.14, uv |
@@ -111,6 +111,8 @@ ADMIN_PASSWORD=admin
 MAX_RECEIPT_AMOUNT=100000
 SUPABASE_URL=
 SUPABASE_SECRET_KEY=
+SUPABASE_DB_ENABLED=false
+SUPABASE_DB_TABLE_PREFIX=receipt_manager
 SUPABASE_STORAGE_BUCKET=receipt-images
 SUPABASE_SIGNED_URL_SECONDS=3600
 ```
@@ -126,9 +128,31 @@ When `OCR_PROVIDER=google_vision`, uploaded receipts are read with Google Vision
 
 For demos without cloud keys, `OCR_PROVIDER=manual` is the safest setting because the app works without an API key.
 
+### Optional Supabase Database
+
+By default, accounts, sessions, receipts, AI summaries, and OCR logs are stored in local SQLite files so the app works with no cloud setup. Those files live inside the backend container unless you mount a persistent volume.
+
+To keep app data after `docker compose down` / rebuilds, use Supabase as the database:
+
+1. Create a Supabase project.
+2. Open the Supabase SQL Editor.
+3. Run the SQL in `backend/supabase_schema.sql`.
+4. Set:
+   ```env
+   SUPABASE_URL=https://your-project-ref.supabase.co
+   SUPABASE_SECRET_KEY=your-secret-or-service-role-key
+   SUPABASE_DB_ENABLED=true
+   SUPABASE_DB_TABLE_PREFIX=receipt_manager
+   ```
+5. Restart Compose.
+
+When `SUPABASE_DB_ENABLED=true`, the backend stores accounts, login sessions, receipt metadata, OCR extracted text, AI event logs, and AI summary cache in Supabase. SQLite remains as the local fallback when this flag is false.
+
+If the backend healthcheck fails after enabling Supabase DB, confirm the schema SQL has been run. A missing table such as `receipt_manager_accounts` means Supabase is reachable but the database tables have not been created yet.
+
 ### Optional Supabase Receipt Image Storage
 
-By default, receipt images are stored in SQLite as data URLs so the app works locally with no cloud setup.
+By default, receipt images are stored as data URLs so the app works locally with no cloud setup.
 
 To store new receipt images in Supabase instead:
 
@@ -138,7 +162,7 @@ To store new receipt images in Supabase instead:
 4. Copy a server-side secret key into `SUPABASE_SECRET_KEY`.
 5. Restart the backend.
 
-When Supabase is configured, the backend uploads new receipt images into the private bucket, stores the storage path in SQLite, and returns temporary signed image URLs when receipts are loaded.
+When Supabase Storage is configured, the backend uploads new receipt images into the private bucket, stores the storage path in the active database, and returns temporary signed image URLs when receipts are loaded.
 
 For newer Supabase projects, use a key from **Settings > API Keys > Secret keys**. For older projects, the legacy **service_role** key also works if you set it as `SUPABASE_SERVICE_ROLE_KEY`.
 
@@ -225,6 +249,8 @@ On Railway, deploy this as two services from the same GitHub repo:
      MAX_RECEIPT_AMOUNT=100000
      SUPABASE_URL=https://your-project-ref.supabase.co
      SUPABASE_SECRET_KEY=your-secret-key
+     SUPABASE_DB_ENABLED=true
+     SUPABASE_DB_TABLE_PREFIX=receipt_manager
      SUPABASE_STORAGE_BUCKET=receipt-images
      SUPABASE_SIGNED_URL_SECONDS=3600
      ```
@@ -246,8 +272,8 @@ Use the frontend public Railway URL as the user-facing app URL.
 - Do not commit `.env` or real API keys.
 - Do not expose the Supabase secret key in frontend code.
 - If a Gemini API key was exposed, rotate it before deployment.
-- Login sessions are stored in SQLite and sent to the browser as HttpOnly cookies, so users stay logged in across backend restarts while the session is valid.
-- SQLite files are stored inside the backend container unless a persistent volume is configured. Supabase Storage only moves receipt image files; receipt metadata remains in SQLite in this version.
+- Login sessions are sent to the browser as HttpOnly cookies and stored in the active backend database.
+- Use `SUPABASE_DB_ENABLED=true` or a Docker volume if you need data to survive container recreation.
 - For production, use persistent storage and set strong admin credentials in environment variables.
 
 ## API Overview

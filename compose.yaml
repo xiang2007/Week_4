@@ -14,6 +14,8 @@ services:
       MAX_RECEIPT_AMOUNT: ${MAX_RECEIPT_AMOUNT:-100000}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_DB_ENABLED: ${SUPABASE_DB_ENABLED:-false}
+      SUPABASE_DB_TABLE_PREFIX: ${SUPABASE_DB_TABLE_PREFIX:-receipt_manager}
       SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-receipt-images}
       SUPABASE_SIGNED_URL_SECONDS: ${SUPABASE_SIGNED_URL_SECONDS:-3600}
     ports:
@@ -21,7 +23,7 @@ services:
     volumes:
       - ./backend/categories.json:/app/categories.json:ro
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os, socket; s = socket.create_connection((os.environ['HEALTHCHECK_HOST'], int(os.environ['PORT'])), timeout=2); s.close()\""]
+      test: ["CMD-SHELL", "python -c \"import os, urllib.request; url = 'http://{}:{}/health'.format(os.environ['HEALTHCHECK_HOST'], os.environ['PORT']); urllib.request.urlopen(url, timeout=3).read()\""]
       interval: 10s
       timeout: 3s
       retries: 5

@@ -248,6 +248,20 @@ async def admin_ai_events(request: Request):
     return response_data(resp)
 
 
+@app.get("/admin/ocr-receipts")
+async def admin_ocr_receipts(request: Request):
+    async with httpx.AsyncClient(timeout=BACKEND_TIMEOUT) as client:
+        resp = await client.get(
+            f"{BACKEND_URL}/admin/ocr-receipts",
+            headers=session_headers(request, admin=True) or None,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=response_detail(resp, "Failed to load OCR receipts"))
+
+    return response_data(resp)
+
+
 @app.post("/admin/accounts/reset-password")
 async def admin_reset_password(request: Request):
     data = await request.json()
