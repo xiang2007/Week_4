@@ -1,38 +1,108 @@
 [
   {
-    "key": "medical_parents",
-    "label": "Parents/Grandparents Medical",
-    "limit": 8000,
-    "color": "#8B5E34",
-    "keywords": ["parents medical", "grandparents medical", "parent", "grandparent", "carer", "elderly care", "complete medical examination"]
+    "key": "individual_dependent_relatives",
+    "label": "Individual & Dependent Relatives",
+    "limit": 9000,
+    "color": "#334155",
+    "keywords": ["individual relief", "dependent relatives", "basic relief"]
+  },
+  {
+    "key": "disabled_individual",
+    "label": "Disabled Individual",
+    "limit": 7000,
+    "color": "#475569",
+    "keywords": ["disabled individual", "oku individual", "jabatan kebajikan masyarakat"]
+  },
+  {
+    "key": "spouse_alimony",
+    "label": "Spouse / Alimony",
+    "limit": 4000,
+    "color": "#64748B",
+    "keywords": ["spouse relief", "alimony", "wife relief", "husband relief"]
+  },
+  {
+    "key": "disabled_spouse",
+    "label": "Disabled Spouse",
+    "limit": 6000,
+    "color": "#6B7280",
+    "keywords": ["disabled spouse", "disabled husband", "disabled wife", "oku spouse"]
+  },
+  {
+    "key": "education",
+    "label": "Self Education Fees",
+    "limit": 7000,
+    "color": "#156F67",
+    "keywords": ["tuition", "course", "college", "university", "education", "training", "upskilling", "exam", "academy", "seminar", "masters", "doctorate", "vocational", "technical", "skills enhancement", "self-development"]
+  },
+  {
+    "key": "housing_loan_interest_500k",
+    "label": "First Home Loan Interest: Property <= RM500k",
+    "limit": 7000,
+    "color": "#7B6A55",
+    "keywords": ["housing loan interest", "mortgage interest", "residential property", "loan statement", "home loan", "first home"]
+  },
+  {
+    "key": "housing_loan_interest_750k",
+    "label": "First Home Loan Interest: RM500k-RM750k Property",
+    "limit": 5000,
+    "color": "#6F5F4D",
+    "keywords": ["housing loan interest 750", "mortgage interest 750", "residential property 750", "first home 750"]
   },
   {
     "key": "medical_self_family",
     "label": "Medical: Self, Spouse or Child",
     "limit": 10000,
     "color": "#A45A3A",
-    "keywords": ["clinic", "hospital", "pharmacy", "doctor", "dental", "dentist", "optical", "optometrist", "medicine", "prescription", "fertility", "vaccination", "vaccine", "health screening", "mental health", "self-testing", "rehabilitation", "guardian", "watsons", "health lane", "big pharmacy"]
+    "keywords": ["clinic", "hospital", "pharmacy", "doctor", "dental", "dentist", "optical", "optometrist", "medicine", "prescription", "fertility", "vaccination", "vaccine", "health screening", "mental health", "self-testing", "rehabilitation", "learning disability", "guardian", "watsons", "health lane", "big pharmacy"]
+  },
+  {
+    "key": "medical_parents",
+    "label": "Parents/Grandparents Medical & Care",
+    "limit": 8000,
+    "color": "#8B5E34",
+    "keywords": ["parents medical", "grandparents medical", "parent treatment", "grandparent treatment", "special needs care", "nursing home", "elderly care", "complete medical examination"]
   },
   {
     "key": "disability_equipment",
     "label": "Disability Supporting Equipment",
     "limit": 6000,
-    "color": "#6B7280",
-    "keywords": ["wheelchair", "hearing aid", "prosthetic", "orthotic", "disabled equipment", "disability equipment", "supporting equipment", "walking frame", "mobility aid"]
+    "color": "#737373",
+    "keywords": ["wheelchair", "hearing aid", "prosthetic", "orthotic", "disabled equipment", "disability equipment", "supporting equipment", "walking frame", "mobility aid", "dialysis machine", "artificial limb"]
+  },
+  {
+    "key": "lifestyle",
+    "label": "Lifestyle: Books, Devices & Internet",
+    "limit": 2500,
+    "color": "#C7772E",
+    "keywords": ["book", "bookstore", "bookshop", "stationery", "textbook", "journal", "magazine", "newspaper", "laptop", "computer", "tablet", "smartphone", "iphone", "ipad", "samsung", "huawei", "xiaomi", "lenovo", "dell", "acer", "asus", "internet", "broadband", "unifi", "maxis fibre", "time fibre"]
+  },
+  {
+    "key": "sports",
+    "label": "Sports Equipment, Gym & Events",
+    "limit": 1000,
+    "color": "#557A38",
+    "keywords": ["sports equipment", "sport", "gym", "fitness", "gym membership", "sports facility", "court rental", "competition", "marathon", "sports training", "decathlon"]
+  },
+  {
+    "key": "renewable_energy",
+    "label": "EV Charging / Food Waste Composting",
+    "limit": 2500,
+    "color": "#2F855A",
+    "keywords": ["ev charger", "electric vehicle charging", "charging facility", "wallbox", "food waste composting", "composting machine", "food waste grinder"]
   },
   {
     "key": "retirement",
-    "label": "EPF/Pension Contributions",
+    "label": "EPF / Pension Contributions",
     "limit": 4000,
     "color": "#4B6F44",
     "keywords": ["epf", "kwsp", "pension", "provident fund", "voluntary contribution"]
   },
   {
     "key": "life_insurance",
-    "label": "Life Insurance",
+    "label": "Life Insurance / Takaful",
     "limit": 3000,
     "color": "#8B4B55",
-    "keywords": ["life insurance", "life assurance"]
+    "keywords": ["life insurance", "life assurance", "life takaful"]
   },
   {
     "key": "prs_deferred_annuity",
@@ -49,46 +119,46 @@
     "keywords": ["medical insurance", "education insurance", "insurance premium", "policy premium", "medical takaful", "education takaful"]
   },
   {
+    "key": "socso",
+    "label": "SOCSO / EIS Contributions",
+    "limit": 350,
+    "color": "#7C6A3D",
+    "keywords": ["socso", "perkeso", "eis", "employee social security", "employment insurance system"]
+  },
+  {
     "key": "sspn",
-    "label": "SSPN Net Deposit",
+    "label": "SSPN Net Savings",
     "limit": 8000,
     "color": "#3D7C98",
     "keywords": ["sspn", "ptptn", "national education savings", "simpanan pendidikan"]
   },
   {
-    "key": "socso",
-    "label": "SOCSO Contributions",
-    "limit": 350,
-    "color": "#7C6A3D",
-    "keywords": ["socso", "perkeso", "eis", "employee social security"]
+    "key": "child_under_18",
+    "label": "Child Below 18",
+    "limit": 2000,
+    "color": "#9A6A2D",
+    "keywords": ["child below 18", "child under 18", "dependent child"]
   },
   {
-    "key": "education",
-    "label": "Self Education Fees",
-    "limit": 7000,
-    "color": "#156F67",
-    "keywords": ["tuition", "course", "college", "university", "education", "training", "upskilling", "exam", "academy", "seminar", "masters", "doctorate", "vocational", "technical"]
+    "key": "child_education_18",
+    "label": "Child 18+ In Full-Time Education",
+    "limit": 8000,
+    "color": "#7C5C2E",
+    "keywords": ["child education", "full-time education", "diploma", "degree", "child university", "child college"]
   },
   {
-    "key": "lifestyle",
-    "label": "Lifestyle: Books, Devices & Internet",
-    "limit": 2500,
-    "color": "#C7772E",
-    "keywords": ["book", "bookstore", "bookshop", "stationery", "textbook", "journal", "magazine", "newspaper", "laptop", "computer", "tablet", "smartphone", "iphone", "ipad", "samsung", "huawei", "xiaomi", "lenovo", "dell", "acer", "asus", "internet", "broadband", "unifi", "maxis fibre", "time fibre"]
+    "key": "disabled_child",
+    "label": "Disabled Child",
+    "limit": 8000,
+    "color": "#8B6F47",
+    "keywords": ["disabled child", "oku child", "unmarried disabled child"]
   },
   {
-    "key": "sports",
-    "label": "Sports Equipment, Gym & Events",
-    "limit": 1000,
-    "color": "#557A38",
-    "keywords": ["sports equipment", "sport", "gym", "fitness", "membership", "sports facility", "court rental", "competition", "marathon", "sports training", "decathlon"]
-  },
-  {
-    "key": "breastfeeding",
-    "label": "Breastfeeding Equipment",
-    "limit": 1000,
-    "color": "#B35F8B",
-    "keywords": ["breastfeeding", "breast pump", "milk storage", "cooler bag", "nursing equipment"]
+    "key": "disabled_child_higher_education",
+    "label": "Disabled Child Higher Education",
+    "limit": 8000,
+    "color": "#6B5B3E",
+    "keywords": ["disabled child higher education", "oku child university", "disabled child college"]
   },
   {
     "key": "childcare",
@@ -98,31 +168,24 @@
     "keywords": ["childcare", "kindergarten", "nursery", "taska", "tadika", "daycare", "care centre"]
   },
   {
-    "key": "renewable_energy",
-    "label": "EV Charging / Green Household Equipment",
-    "limit": 2500,
-    "color": "#2F855A",
-    "keywords": ["ev charger", "electric vehicle charging", "charging facility", "wallbox", "food waste composting", "composting machine", "food waste grinder", "cctv", "closed-circuit television"]
-  },
-  {
-    "key": "housing_loan_interest_500k",
-    "label": "Housing Loan Interest: Property <= RM500k",
-    "limit": 7000,
-    "color": "#7B6A55",
-    "keywords": ["housing loan interest", "mortgage interest", "residential property", "loan statement", "home loan"]
-  },
-  {
-    "key": "housing_loan_interest_750k",
-    "label": "Housing Loan Interest: RM500k-RM750k Property",
-    "limit": 5000,
-    "color": "#6F5F4D",
-    "keywords": ["housing loan interest 750", "mortgage interest 750", "residential property 750"]
-  },
-  {
-    "key": "tourism_culture",
-    "label": "Tourist Attraction / Culture Programme",
+    "key": "breastfeeding",
+    "label": "Breastfeeding Equipment",
     "limit": 1000,
+    "color": "#B35F8B",
+    "keywords": ["breastfeeding", "breast pump", "milk storage", "cooler bag", "nursing equipment"]
+  },
+  {
+    "key": "donations",
+    "label": "Approved Donations / Gifts",
+    "limit": null,
+    "color": "#A85534",
+    "keywords": ["approved donation", "donation receipt", "charity", "gift of money", "approved institution", "approved organisation"]
+  },
+  {
+    "key": "professional_membership",
+    "label": "Professional Body Membership",
+    "limit": null,
     "color": "#6C5A94",
-    "keywords": ["tourist attraction", "museum", "zoo", "aquarium", "theme park", "cultural programme", "arts programme", "gallery", "heritage", "ticket"]
+    "keywords": ["professional body", "professional membership", "membership subscription", "mia", "ctim", "bar council", "architect board", "engineering board"]
   }
 ]
