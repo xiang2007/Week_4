@@ -37,7 +37,6 @@
 
     const Icon = ({ name, size = 18 }) => <i data-lucide={name} style={{ width: size, height: size }} aria-hidden="true"></i>;
     const fmt = value => 'RM ' + Number(value || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    const fmtNumber = value => Number(value || 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     const MAX_RECEIPT_AMOUNT = 100000;
     const MIN_RECEIPT_AMOUNT = 0.01;
     const MAX_ANNUAL_INCOME = 1000000000000;
@@ -92,24 +91,6 @@
         lowerBound = bracket.upTo;
       }
       return 0;
-    }
-
-    function residentTaxBreakdown(chargeableIncome) {
-      const rows = [];
-      let lowerBound = 0;
-      for (const bracket of RESIDENT_TAX_BRACKETS) {
-        if (chargeableIncome <= lowerBound) break;
-        const taxableAtBracket = Math.min(chargeableIncome, bracket.upTo) - lowerBound;
-        if (taxableAtBracket > 0) {
-          rows.push({
-            amount: taxableAtBracket,
-            rate: bracket.rate,
-            tax: taxableAtBracket * bracket.rate,
-          });
-        }
-        lowerBound = bracket.upTo;
-      }
-      return rows;
     }
 
     async function readJson(resp) {
@@ -1029,9 +1010,15 @@
       const chargeableIncome = Math.max(0, Number(annualIncome || 0) - Number(taxPlan.total_claimed || 0));
       const estimatedTaxBeforeRebate = estimateResidentTax(chargeableIncome);
       const finalTaxPayable = Math.max(0, estimatedTaxBeforeRebate - Number(taxRebateAmount || 0));
-      const averageTaxRate = chargeableIncome > 0 ? (finalTaxPayable / chargeableIncome) * 100 : 0;
+      const effectiveTaxRate = Number(annualIncome || 0) > 0 ? (finalTaxPayable / Number(annualIncome || 0)) * 100 : 0;
       const claimedCategories = taxPlan.categories.filter(cat => Number(cat.claimable_amount || 0) > 0);
-      const taxBreakdown = residentTaxBreakdown(chargeableIncome);
+      const taxSummaryRows = [
+        { label: 'Annual income', value: fmt(annualIncome), tone: 'neutral' },
+        { label: 'Less: receipt relief claims', value: `-${fmt(taxPlan.total_claimed)}`, tone: 'deduct' },
+        { label: 'Chargeable income', value: fmt(chargeableIncome), tone: 'strong' },
+        { label: 'Tax before rebate', value: fmt(estimatedTaxBeforeRebate), tone: 'neutral' },
+        { label: 'Less: tax rebate', value: `-${fmt(taxRebateAmount)}`, tone: 'deduct' },
+      ];
 
       return (
         <section className="dashboard-section">
@@ -1063,59 +1050,32 @@
             <section className="panel planner-results-panel">
               <div className="tax-result-card">
                 <div className="tax-result-head">
-                  <h2>Income Tax Summary YA 2025</h2>
+                  <div>
+                    <p className="eyebrow">Income tax summary</p>
+                    <h2>YA 2025 estimate</h2>
+                  </div>
                   <span>{taxPlanStatus}</span>
                 </div>
-                <div className="tax-result-sheet">
-                  <div className="tax-summary-row">
-                    <span>Gross Income Before Deduction</span>
-                    <strong>{fmtNumber(annualIncome)}</strong>
-                  </div>
-                  <div className="tax-summary-row deduct">
-                    <span>Tax Deductions</span>
-                    <strong>- {fmtNumber(taxPlan.total_claimed)}</strong>
-                  </div>
-                  <div className="relief-breakdown">
-                    <div><span>Individual / Spouse Relief</span><strong>0</strong></div>
-                    <div><span>Child Relief</span><strong>0</strong></div>
-                    <div><span>Parent Relief</span><strong>0</strong></div>
-                    <div><span>Other Relief</span><strong>{fmtNumber(taxPlan.total_claimed)}</strong></div>
-                  </div>
-                  <hr />
-                  <div className="tax-summary-row strong">
-                    <span>Taxable Income</span>
-                    <strong>{fmtNumber(chargeableIncome)}</strong>
-                  </div>
-                  <div className="tax-summary-row strong">
-                    <span>Tax Amount</span>
-                    <strong>{fmtNumber(estimatedTaxBeforeRebate)}</strong>
-                  </div>
-                  <div className="tax-breakdown">
-                    {taxBreakdown.length ? taxBreakdown.map((row, index) => (
-                      <div key={`${row.amount}-${index}`}>
-                        <span className="tax-breakdown-formula">{fmtNumber(row.amount)} x {(row.rate * 100).toFixed(0)}%</span>
-                        <span className="tax-breakdown-equals">=</span>
-                        <strong>{fmtNumber(row.tax)}</strong>
-                      </div>
-                    )) : <div><span className="tax-breakdown-formula">0 x 0%</span><span className="tax-breakdown-equals">=</span><strong>0</strong></div>}
-                  </div>
-                  <div className="tax-summary-row deduct rebate-row">
-                    <span>Less Zakat</span>
-                    <strong>- 0</strong>
-                  </div>
-                  <div className="tax-summary-row deduct">
-                    <span>Less Tax Rebate</span>
-                    <strong>- {fmtNumber(taxRebateAmount)}</strong>
-                  </div>
-                  <hr className="final-rule" />
+                <div className="tax-result-total">
+                  <span>Estimated tax payable</span>
+                  <strong>{fmt(finalTaxPayable)}</strong>
+                  <small>After relief claims and rebate</small>
+                </div>
+                <div className="tax-summary-table">
+                  {taxSummaryRows.map(row => (
+                    <div className={`tax-summary-row ${row.tone}`} key={row.label}>
+                      <span>{row.label}</span>
+                      <strong>{row.value}</strong>
+                    </div>
+                  ))}
                   <div className="tax-summary-row payable">
-                    <span>Tax You Should Pay</span>
+                    <span>Final tax payable</span>
                     <strong>{fmt(finalTaxPayable)}</strong>
                   </div>
-                  <div className="tax-average-row">
-                    <span>Average Tax Rate</span>
-                    <strong>({fmtNumber(finalTaxPayable)}/{fmtNumber(chargeableIncome)}) x 100% = {averageTaxRate.toFixed(1)}%</strong>
-                  </div>
+                </div>
+                <div className="tax-result-foot">
+                  <span>Effective tax rate</span>
+                  <strong>{effectiveTaxRate.toFixed(2)}%</strong>
                 </div>
               </div>
 
