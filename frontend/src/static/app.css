@@ -783,117 +783,142 @@ body.authenticated .app-shell {
 
 .tax-result-card {
   display: grid;
-  gap: 1rem;
   margin-bottom: 1rem;
-  padding: 1rem;
-  border: 1px solid rgba(21, 111, 103, 0.2);
+  overflow: hidden;
+  border: 2px solid var(--ink);
   border-radius: var(--radius);
-  background:
-    linear-gradient(135deg, rgba(232, 247, 241, 0.96), rgba(255, 255, 255, 0.98) 48%),
-    var(--surface);
+  background: #fff;
 }
 
-.tax-result-head,
-.tax-result-foot,
-.tax-summary-row {
+.tax-result-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  padding: 1rem;
+  color: #fff;
+  background: var(--ink);
 }
 
 .tax-result-head h2 {
   margin: 0;
-  font-size: 1.25rem;
+  color: #fff;
+  font-size: 1rem;
 }
 
 .tax-result-head > span {
   padding: 0.35rem 0.65rem;
-  border: 1px solid rgba(21, 111, 103, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 999px;
-  color: var(--brand-deep);
-  background: rgba(255, 255, 255, 0.78);
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.08);
   font: 800 0.72rem var(--font-body);
 }
 
-.tax-result-total {
+.tax-result-sheet {
   display: grid;
-  gap: 0.25rem;
   padding: 1rem;
-  border-radius: var(--radius);
-  color: #fff;
-  background: linear-gradient(135deg, var(--brand-deep), #1D8A74);
-}
-
-.tax-result-total span,
-.tax-result-total small {
-  color: rgba(255, 255, 255, 0.78);
-  font-weight: 700;
-}
-
-.tax-result-total strong {
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 5vw, 3.2rem);
-  line-height: 1;
-}
-
-.tax-summary-table {
-  display: grid;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.72);
 }
 
 .tax-summary-row {
-  min-height: 48px;
-  padding: 0.75rem 0.85rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.tax-summary-row:last-child {
-  border-bottom: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.35rem 0;
 }
 
 .tax-summary-row span {
-  color: var(--ink-soft);
+  color: var(--ink);
   font-weight: 700;
 }
 
-.tax-summary-row strong,
-.tax-result-foot strong {
-  font: 800 0.95rem var(--font-mono);
+.tax-summary-row strong {
+  text-align: right;
+  font: 800 1.08rem var(--font-mono);
   white-space: nowrap;
 }
 
+.tax-summary-row.deduct,
 .tax-summary-row.deduct strong {
-  color: var(--brand-deep);
+  color: var(--danger);
 }
 
-.tax-summary-row.strong {
-  background: rgba(21, 111, 103, 0.06);
+.relief-breakdown,
+.tax-breakdown {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.25rem 0 0.45rem;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
 }
 
-.tax-summary-row.strong strong {
-  color: var(--brand-deep);
+.relief-breakdown div,
+.tax-breakdown div,
+.tax-average-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
+  gap: 1rem;
+  align-items: center;
+}
+
+.relief-breakdown strong,
+.tax-breakdown strong,
+.tax-average-row strong {
+  text-align: right;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.tax-breakdown {
+  justify-items: end;
+  margin: 0.25rem 0 1rem;
+}
+
+.tax-breakdown div {
+  width: min(100%, 280px);
+}
+
+.tax-result-sheet hr {
+  width: 100%;
+  margin: 0.4rem 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.tax-result-sheet .final-rule {
+  margin: 0.75rem 0 0.45rem;
+  border-top: 2px solid var(--ink);
+}
+
+.rebate-row {
+  margin-top: 0.75rem;
 }
 
 .tax-summary-row.payable {
-  background: var(--ink);
-  color: #fff;
+  padding-top: 0.2rem;
+  font-size: 1.05rem;
 }
 
-.tax-summary-row.payable span,
+.tax-summary-row.payable span {
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
 .tax-summary-row.payable strong {
-  color: #fff;
+  color: var(--ink);
+  font-size: 1.2rem;
 }
 
-.tax-result-foot {
-  padding: 0.8rem 0.9rem;
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.72);
+.tax-average-row {
+  margin-top: 0.35rem;
   color: var(--ink-soft);
-  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.tax-average-row strong {
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .claimed-category-row {
@@ -1671,15 +1696,25 @@ body.authenticated:not(.uploading) .advisor-chat {
     min-height: 108px;
   }
 
-  .tax-result-head,
-  .tax-result-foot,
-  .tax-summary-row {
+  .tax-result-head {
     align-items: flex-start;
   }
 
-  .tax-summary-row {
-    flex-direction: column;
+  .tax-summary-row,
+  .relief-breakdown div,
+  .tax-average-row {
+    grid-template-columns: 1fr;
     gap: 0.35rem;
+  }
+
+  .tax-summary-row strong,
+  .relief-breakdown strong,
+  .tax-average-row strong {
+    text-align: left;
+  }
+
+  .tax-breakdown div {
+    width: 100%;
   }
 
   .landing-navlinks a:not(.btn) {
