@@ -160,6 +160,7 @@
       const [messages, setMessages] = useState([{ type: 'ai', text: 'Hi, I can help review your receipt claims, category limits, and next best action. I am not a licensed financial advisor.' }]);
       const [toast, setToast] = useState('');
       const [preview, setPreview] = useState('');
+      const [categoryPickerId, setCategoryPickerId] = useState(null);
 
       const authenticated = Boolean(accountName);
       const confirmed = receipts.filter(r => r.confirmed);
@@ -807,12 +808,14 @@
                 autoCategorizePendingReceipts={autoCategorizePendingReceipts}
                 handleFiles={handleFiles}
                 openPreview={setPreview}
+                openCategoryPicker={setCategoryPickerId}
                 showDashboard={() => setView('dashboard')}
               />
             )}
             {view === 'dashboard' && <button className="fab" onClick={() => setView('upload')} type="button" aria-label="Open upload section"><Icon name="plus" size={26} /></button>}
           </main>
           <AdvisorChat open={chatOpen} setOpen={setChatOpen} messages={messages} busy={chatBusy} onAsk={askAdvisor} />
+          {categoryPickerId !== null && <CategoryPickerModal receipt={pending.find(r => r.id === categoryPickerId)} close={() => setCategoryPickerId(null)} updateReceipt={updateReceipt} />}
           {preview && <ImageModal src={preview} close={() => setPreview('')} />}
           <div className={`toast ${toast ? 'visible' : ''}`} role="status" aria-live="polite">{toast}</div>
         </>
@@ -1070,7 +1073,7 @@
       );
     }
 
-    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, rescanPendingReceipts, autoCategorizePendingReceipts, handleFiles, openPreview, showDashboard }) {
+    function UploadView({ pending, extractingIds, savingIds, savingAll, ocrEnabled, ocrConfig, setOcrEnabled, confirmed, updateReceipt, removePending, confirmReceipt, saveAllPending, rescanPendingReceipts, autoCategorizePendingReceipts, handleFiles, openPreview, openCategoryPicker, showDashboard }) {
       const fileRef = useRef(null);
       const cameraRef = useRef(null);
       const [dragging, setDragging] = useState(false);
@@ -1111,7 +1114,7 @@
           <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" multiple hidden onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
           <div className="pending-list">
             {pending.length ? pending.map(r => (
-              <PendingCard key={r.id} receipt={r} confirmed={confirmed} extracting={extractingIds.includes(r.id)} saving={savingIds.includes(r.id)} updateReceipt={updateReceipt} removePending={removePending} confirmReceipt={confirmReceipt} openPreview={openPreview} />
+              <PendingCard key={r.id} receipt={r} confirmed={confirmed} extracting={extractingIds.includes(r.id)} saving={savingIds.includes(r.id)} updateReceipt={updateReceipt} removePending={removePending} confirmReceipt={confirmReceipt} openPreview={openPreview} openCategoryPicker={openCategoryPicker} />
             )) : <p className="empty">All uploaded receipts are saved. Add more files or go back to the dashboard when you are done.</p>}
           </div>
           {pending.length ? <div className="pending-actions">
@@ -1123,25 +1126,12 @@
       );
     }
 
-    function PendingCard({ receipt, confirmed, extracting, saving, updateReceipt, removePending, confirmReceipt, openPreview }) {
-      const [categorySearch, setCategorySearch] = useState('');
+    function PendingCard({ receipt, confirmed, extracting, saving, updateReceipt, removePending, confirmReceipt, openPreview, openCategoryPicker }) {
       const selectedCategory = categoryByKey(receipt.categoryKey);
       const duplicate = Boolean(receipt.amount && receipt.categoryKey && receipt.receiptDate && confirmed.some(r => Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) && r.receiptDate === receipt.receiptDate && r.categoryKey === receipt.categoryKey));
       const amountInvalid = !receipt.amount || receipt.amount < MIN_RECEIPT_AMOUNT || receipt.amount > MAX_RECEIPT_AMOUNT;
       const categoryInvalid = !receipt.categoryKey;
       const extractionMessage = typeof receipt.extractionMessage === 'string' ? receipt.extractionMessage.trim() : '';
-      const categoryMatches = TAX_RELIEF_CATEGORIES
-        .map(cat => {
-          const query = categorySearch.trim().toLowerCase();
-          const keywordText = (cat.keywords || []).join(' ');
-          const haystack = `${cat.label} ${cat.key} ${keywordText}`.toLowerCase();
-          const selected = cat.key === receipt.categoryKey;
-          const matches = !query || haystack.includes(query);
-          return { cat, selected, matches, keywordText };
-        })
-        .filter(item => item.matches || item.selected)
-        .sort((a, b) => Number(b.selected) - Number(a.selected) || a.cat.label.localeCompare(b.cat.label))
-        .slice(0, 8);
       return (
         <article className={`receipt-card ${receipt.needsReview || duplicate ? 'has-warning' : ''} ${amountInvalid || categoryInvalid ? 'has-error' : ''}`} data-pending-card={receipt.id}>
           <img className="receipt-thumb" src={receipt.imageDataUrl} alt="" onClick={() => openPreview(receipt.imageDataUrl)} />
@@ -1164,26 +1154,15 @@
               <div className="field"><label>Amount</label><input className={amountInvalid ? 'input-error' : ''} value={receipt.amount || ''} onChange={e => updateReceipt(receipt.id, { amount: parseFloat(e.target.value) || 0 })} type="number" min={MIN_RECEIPT_AMOUNT} max={MAX_RECEIPT_AMOUNT} step="0.01" placeholder="0.00" /></div>
               <div className="field category-field">
                 <label>Category</label>
-                <div className={`category-picker ${categoryInvalid ? 'input-error' : ''}`}>
-                  <div className="category-selected">
+                <div className={`category-summary ${categoryInvalid ? 'input-error' : ''}`}>
+                  <div className="category-summary-main">
                     <span className="swatch" style={{ background: selectedCategory?.color || '#BAC6D6' }}></span>
                     <div>
                       <strong>{selectedCategory ? selectedCategory.label : 'Select category'}</strong>
-                      <span>{selectedCategory ? (selectedCategory.limit === Infinity ? 'No limit' : `${fmt(selectedCategory.limit)} limit`) : 'Search by name or receipt keyword'}</span>
+                      <span>{selectedCategory ? `${selectedCategory.limit === Infinity ? 'No limit' : `${fmt(selectedCategory.limit)} limit`} · Suggested from receipt text` : 'No category selected yet'}</span>
                     </div>
                   </div>
-                  <input value={categorySearch} onChange={e => setCategorySearch(e.target.value)} placeholder="Search categories" aria-label="Search receipt categories" />
-                  <div className="category-options">
-                    {categoryMatches.length ? categoryMatches.map(({ cat, selected, keywordText }) => (
-                      <button className={`category-option ${selected ? 'active' : ''}`} key={cat.key} type="button" onClick={() => { updateReceipt(receipt.id, { categoryKey: cat.key }); setCategorySearch(''); }}>
-                        <span className="swatch" style={{ background: cat.color || '#416D94' }}></span>
-                        <span>
-                          <strong>{cat.label}</strong>
-                          <small>{cat.limit === Infinity ? 'No limit' : `${fmt(cat.limit)} limit`}{keywordText ? ` · ${keywordText.split(' ').slice(0, 4).join(' ')}` : ''}</small>
-                        </span>
-                      </button>
-                    )) : <p className="category-empty">No category found.</p>}
-                  </div>
+                  <button className="btn btn-outline btn-sm" type="button" onClick={() => openCategoryPicker(receipt.id)}>Change</button>
                 </div>
               </div>
             </div>
@@ -1194,6 +1173,78 @@
             </div>
           </div>
         </article>
+      );
+    }
+
+    function categoryGroupLabel(cat) {
+      const text = `${cat.key} ${cat.label}`.toLowerCase();
+      if (/medical|health|disability|parent|equipment/.test(text)) return 'Medical & care';
+      if (/child|spouse|relative|dependent|breastfeeding|childcare/.test(text)) return 'Family';
+      if (/insurance|retirement|prs|socso|sspn|life/.test(text)) return 'Insurance & savings';
+      if (/education|book|professional|membership/.test(text)) return 'Education & professional';
+      if (/lifestyle|sport|renewable|housing|donation/.test(text)) return 'Lifestyle & other';
+      return 'Other';
+    }
+
+    function CategoryPickerModal({ receipt, close, updateReceipt }) {
+      const [query, setQuery] = useState('');
+      if (!receipt) return null;
+      const selectedCategory = categoryByKey(receipt.categoryKey);
+      const normalizedQuery = query.trim().toLowerCase();
+      const matches = TAX_RELIEF_CATEGORIES
+        .map(cat => {
+          const keywordText = (cat.keywords || []).join(' ');
+          const haystack = `${cat.label} ${cat.key} ${keywordText}`.toLowerCase();
+          return { cat, keywordText, selected: cat.key === receipt.categoryKey, matches: !normalizedQuery || haystack.includes(normalizedQuery) };
+        })
+        .filter(item => item.matches || item.selected)
+        .sort((a, b) => Number(b.selected) - Number(a.selected) || categoryGroupLabel(a.cat).localeCompare(categoryGroupLabel(b.cat)) || a.cat.label.localeCompare(b.cat.label));
+      const groups = matches.reduce((map, item) => {
+        const label = categoryGroupLabel(item.cat);
+        if (!map.has(label)) map.set(label, []);
+        map.get(label).push(item);
+        return map;
+      }, new Map());
+      function choose(cat) {
+        updateReceipt(receipt.id, { categoryKey: cat.key });
+        close();
+      }
+      return (
+        <div className="category-modal open" onClick={e => { if (e.target === e.currentTarget) close(); }}>
+          <section className="category-sheet" role="dialog" aria-modal="true" aria-label="Choose receipt category">
+            <div className="category-sheet-head">
+              <div>
+                <p className="eyebrow">Receipt category</p>
+                <h2>{selectedCategory ? selectedCategory.label : 'Choose category'}</h2>
+              </div>
+              <button className="icon-btn" type="button" onClick={close} aria-label="Close category picker"><Icon name="x" size={16} /></button>
+            </div>
+            {selectedCategory ? <button className="category-suggestion" type="button" onClick={() => choose(selectedCategory)}>
+              <span className="swatch" style={{ background: selectedCategory.color || '#416D94' }}></span>
+              <span><strong>Use suggested category</strong><small>{selectedCategory.label} · {selectedCategory.limit === Infinity ? 'No limit' : `${fmt(selectedCategory.limit)} limit`}</small></span>
+            </button> : null}
+            <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search category or keyword" autoFocus />
+            <div className="category-group-list">
+              {groups.size ? [...groups.entries()].map(([label, items]) => (
+                <section className="category-group" key={label}>
+                  <h3>{label}</h3>
+                  <div className="category-option-list">
+                    {items.map(({ cat, selected, keywordText }) => (
+                      <button className={`category-option ${selected ? 'active' : ''}`} key={cat.key} type="button" onClick={() => choose(cat)}>
+                        <span className="swatch" style={{ background: cat.color || '#416D94' }}></span>
+                        <span>
+                          <strong>{cat.label}</strong>
+                          <small>{cat.limit === Infinity ? 'No limit' : `${fmt(cat.limit)} limit`}{keywordText ? ` · ${keywordText.split(' ').slice(0, 4).join(' ')}` : ''}</small>
+                        </span>
+                        {selected ? <Icon name="check" size={16} /> : null}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )) : <p className="category-empty">No category found.</p>}
+            </div>
+          </section>
+        </div>
       );
     }
 
