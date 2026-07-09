@@ -1124,10 +1124,24 @@
     }
 
     function PendingCard({ receipt, confirmed, extracting, saving, updateReceipt, removePending, confirmReceipt, openPreview }) {
+      const [categorySearch, setCategorySearch] = useState('');
+      const selectedCategory = categoryByKey(receipt.categoryKey);
       const duplicate = Boolean(receipt.amount && receipt.categoryKey && receipt.receiptDate && confirmed.some(r => Number(r.amount || 0).toFixed(2) === Number(receipt.amount || 0).toFixed(2) && r.receiptDate === receipt.receiptDate && r.categoryKey === receipt.categoryKey));
       const amountInvalid = !receipt.amount || receipt.amount < MIN_RECEIPT_AMOUNT || receipt.amount > MAX_RECEIPT_AMOUNT;
       const categoryInvalid = !receipt.categoryKey;
       const extractionMessage = typeof receipt.extractionMessage === 'string' ? receipt.extractionMessage.trim() : '';
+      const categoryMatches = TAX_RELIEF_CATEGORIES
+        .map(cat => {
+          const query = categorySearch.trim().toLowerCase();
+          const keywordText = (cat.keywords || []).join(' ');
+          const haystack = `${cat.label} ${cat.key} ${keywordText}`.toLowerCase();
+          const selected = cat.key === receipt.categoryKey;
+          const matches = !query || haystack.includes(query);
+          return { cat, selected, matches, keywordText };
+        })
+        .filter(item => item.matches || item.selected)
+        .sort((a, b) => Number(b.selected) - Number(a.selected) || a.cat.label.localeCompare(b.cat.label))
+        .slice(0, 8);
       return (
         <article className={`receipt-card ${receipt.needsReview || duplicate ? 'has-warning' : ''} ${amountInvalid || categoryInvalid ? 'has-error' : ''}`} data-pending-card={receipt.id}>
           <img className="receipt-thumb" src={receipt.imageDataUrl} alt="" onClick={() => openPreview(receipt.imageDataUrl)} />
@@ -1148,7 +1162,30 @@
               }} placeholder="Optional" /></div>
               <div className="field"><label>Date</label><input value={receipt.receiptDate || ''} onChange={e => updateReceipt(receipt.id, { receiptDate: e.target.value })} type="date" /></div>
               <div className="field"><label>Amount</label><input className={amountInvalid ? 'input-error' : ''} value={receipt.amount || ''} onChange={e => updateReceipt(receipt.id, { amount: parseFloat(e.target.value) || 0 })} type="number" min={MIN_RECEIPT_AMOUNT} max={MAX_RECEIPT_AMOUNT} step="0.01" placeholder="0.00" /></div>
-              <div className="field"><label>Category</label><select className={categoryInvalid ? 'input-error' : ''} value={receipt.categoryKey || ''} onChange={e => updateReceipt(receipt.id, { categoryKey: e.target.value })}><option value="">Select category</option>{TAX_RELIEF_CATEGORIES.map(cat => <option key={cat.key} value={cat.key}>{cat.label} ({cat.limit === Infinity ? 'no limit' : fmt(cat.limit)})</option>)}</select></div>
+              <div className="field category-field">
+                <label>Category</label>
+                <div className={`category-picker ${categoryInvalid ? 'input-error' : ''}`}>
+                  <div className="category-selected">
+                    <span className="swatch" style={{ background: selectedCategory?.color || '#BAC6D6' }}></span>
+                    <div>
+                      <strong>{selectedCategory ? selectedCategory.label : 'Select category'}</strong>
+                      <span>{selectedCategory ? (selectedCategory.limit === Infinity ? 'No limit' : `${fmt(selectedCategory.limit)} limit`) : 'Search by name or receipt keyword'}</span>
+                    </div>
+                  </div>
+                  <input value={categorySearch} onChange={e => setCategorySearch(e.target.value)} placeholder="Search categories" aria-label="Search receipt categories" />
+                  <div className="category-options">
+                    {categoryMatches.length ? categoryMatches.map(({ cat, selected, keywordText }) => (
+                      <button className={`category-option ${selected ? 'active' : ''}`} key={cat.key} type="button" onClick={() => { updateReceipt(receipt.id, { categoryKey: cat.key }); setCategorySearch(''); }}>
+                        <span className="swatch" style={{ background: cat.color || '#416D94' }}></span>
+                        <span>
+                          <strong>{cat.label}</strong>
+                          <small>{cat.limit === Infinity ? 'No limit' : `${fmt(cat.limit)} limit`}{keywordText ? ` · ${keywordText.split(' ').slice(0, 4).join(' ')}` : ''}</small>
+                        </span>
+                      </button>
+                    )) : <p className="category-empty">No category found.</p>}
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="action-row">
               <button className="btn btn-outline btn-sm" onClick={() => openPreview(receipt.imageDataUrl)} type="button">View receipt</button>
