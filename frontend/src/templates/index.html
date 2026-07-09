@@ -1010,15 +1010,7 @@
       const chargeableIncome = Math.max(0, Number(annualIncome || 0) - Number(taxPlan.total_claimed || 0));
       const estimatedTaxBeforeRebate = estimateResidentTax(chargeableIncome);
       const finalTaxPayable = Math.max(0, estimatedTaxBeforeRebate - Number(taxRebateAmount || 0));
-      const effectiveTaxRate = Number(annualIncome || 0) > 0 ? (finalTaxPayable / Number(annualIncome || 0)) * 100 : 0;
       const claimedCategories = taxPlan.categories.filter(cat => Number(cat.claimable_amount || 0) > 0);
-      const taxSummaryRows = [
-        { label: 'Annual income', value: fmt(annualIncome), tone: 'neutral' },
-        { label: 'Less: receipt relief claims', value: `-${fmt(taxPlan.total_claimed)}`, tone: 'deduct' },
-        { label: 'Chargeable income', value: fmt(chargeableIncome), tone: 'strong' },
-        { label: 'Tax before rebate', value: fmt(estimatedTaxBeforeRebate), tone: 'neutral' },
-        { label: 'Less: tax rebate', value: `-${fmt(taxRebateAmount)}`, tone: 'deduct' },
-      ];
 
       return (
         <section className="dashboard-section">
@@ -1048,35 +1040,12 @@
             </section>
 
             <section className="panel planner-results-panel">
-              <div className="tax-result-card">
-                <div className="tax-result-head">
-                  <div>
-                    <p className="eyebrow">Income tax summary</p>
-                    <h2>YA 2025 estimate</h2>
-                  </div>
-                  <span>{taxPlanStatus}</span>
-                </div>
-                <div className="tax-result-total">
-                  <span>Estimated tax payable</span>
-                  <strong>{fmt(finalTaxPayable)}</strong>
-                  <small>After relief claims and rebate</small>
-                </div>
-                <div className="tax-summary-table">
-                  {taxSummaryRows.map(row => (
-                    <div className={`tax-summary-row ${row.tone}`} key={row.label}>
-                      <span>{row.label}</span>
-                      <strong>{row.value}</strong>
-                    </div>
-                  ))}
-                  <div className="tax-summary-row payable">
-                    <span>Final tax payable</span>
-                    <strong>{fmt(finalTaxPayable)}</strong>
-                  </div>
-                </div>
-                <div className="tax-result-foot">
-                  <span>Effective tax rate</span>
-                  <strong>{effectiveTaxRate.toFixed(2)}%</strong>
-                </div>
+              <div className="panel-title-row"><h2>Estimated result</h2><span>{fmt(finalTaxPayable)}</span></div>
+              <div className="planner-metrics">
+                <Metric label="Receipt claims" value={fmt(taxPlan.total_claimed)} note="From saved receipt categories" primary />
+                <Metric label="Chargeable income" value={fmt(chargeableIncome)} note="Income after claims" />
+                <Metric label="Tax before rebate" value={fmt(estimatedTaxBeforeRebate)} note="Resident-rate estimate" />
+                <Metric label="Final tax payable" value={fmt(finalTaxPayable)} note={`After ${fmt(taxRebateAmount || 0)} rebate`} />
               </div>
 
               <div className="claimed-category-list">
