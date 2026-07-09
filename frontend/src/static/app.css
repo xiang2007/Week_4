@@ -871,12 +871,40 @@ body.authenticated .app-shell {
 }
 
 .tax-breakdown {
-  justify-items: end;
-  margin: 0.25rem 0 1rem;
+  justify-items: stretch;
+  margin: 0.35rem 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface-soft);
 }
 
 .tax-breakdown div {
-  width: min(100%, 280px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6.5rem;
+  gap: 0;
+  width: min(100%, 360px);
+  justify-self: end;
+  font-size: 0.86rem;
+}
+
+.tax-breakdown span {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tax-breakdown span::after {
+  content: "=";
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+}
+
+.tax-breakdown strong {
+  padding-left: 0.85rem;
 }
 
 .tax-result-sheet hr {
@@ -1715,6 +1743,11 @@ body.authenticated:not(.uploading) .advisor-chat {
 
   .tax-breakdown div {
     width: 100%;
+    grid-template-columns: minmax(0, 1fr) 5.75rem;
+  }
+
+  .tax-breakdown span {
+    white-space: normal;
   }
 
   .landing-navlinks a:not(.btn) {
