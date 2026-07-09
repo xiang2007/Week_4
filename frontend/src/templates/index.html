@@ -1093,10 +1093,11 @@
                   <div className="tax-breakdown">
                     {taxBreakdown.length ? taxBreakdown.map((row, index) => (
                       <div key={`${row.amount}-${index}`}>
-                        <span>{fmtNumber(row.amount)} x {(row.rate * 100).toFixed(0)}%</span>
+                        <span className="tax-breakdown-formula">{fmtNumber(row.amount)} x {(row.rate * 100).toFixed(0)}%</span>
+                        <span className="tax-breakdown-equals">=</span>
                         <strong>{fmtNumber(row.tax)}</strong>
                       </div>
-                    )) : <div><span>0 x 0%</span><strong>0</strong></div>}
+                    )) : <div><span className="tax-breakdown-formula">0 x 0%</span><span className="tax-breakdown-equals">=</span><strong>0</strong></div>}
                   </div>
                   <div className="tax-summary-row deduct rebate-row">
                     <span>Less Zakat</span>
